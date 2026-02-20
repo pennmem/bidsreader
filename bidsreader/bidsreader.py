@@ -4,26 +4,19 @@ from mne_bids import BIDSPath, read_raw_bids, get_entity_vals
 import mne
 from ptsa.data.timeseries import TimeSeries
 from pathlib import Path
-from typing import Iterable, Any
+from typing import Iterable, Any, Tuple, Sequence, Optional, Union, Dict
 import re
-from typing import Sequence, Optional, Union
 import numpy as np
 import pandas as pd
 import warnings
 import json
+from .constants import CML_ROOT, INTRACRANIAL_FIELDS, SCALP_FIELDS, VALID_EEG_TYPES, VALID_ACQ
+from ._errorwrap import public_api
+from .util import validate_option
 
-__all__ = ["BIDSReader"]
+### NEED TO ADD SCALP SUPORT TO LOAD ELECTRODES, CHANNELS, ALSO ADD SUPPORT FOR SHOW JSON FOR eeg, events, and coordsystem
 
 # modular level helpers
-def _validate_option(name: str, value: Any, allowed: Iterable[Any]):
-    if value is None:
-        return None
-    if value not in allowed:
-        allowed_str = ", ".join(str(a) for a in allowed)
-        raise ValueError(f"{name} was not set to {allowed_str}")
-    return value
-
-
 def _space_from_coordsystem_fname(fname: str) -> Optional[str]:
     if "_space-" not in fname:
         return None
@@ -85,24 +78,14 @@ def _merge_duplicate_sample_events(evs: pd.DataFrame, sample_col: str = "sample"
 
     return out_df
 
-def _find_coord_triplets(columns: Sequence[str]):
-        """
-        Find coordinate triplets in columns:
-          - x,y,z
-          - <prefix>.x, <prefix>.y, <prefix>.z  (e.g., tal.x, tal.y, tal.z)
-        Returns dict: prefix -> (xcol, ycol, zcol)
-        where prefix is '' for bare x/y/z.
-        """
+def _find_coord_triplets(columns: Sequence[str]) -> Dict[str, Tuple[str, str, str]]:
         cols = set(columns)
 
         triplets = {}
 
-        # bare x/y/z
         if {"x", "y", "z"} <= cols:
             triplets[""] = ("x", "y", "z")
 
-        # prefixed *.x/*.y/*.z
-        # match things like "tal.x"
         prefixed = [c for c in cols if re.match(r"^.+\.(x|y|z)$", c)]
         prefixes = set(c.rsplit(".", 1)[0] for c in prefixed)
 
@@ -164,13 +147,6 @@ def _combine_bipolar_electrodes(
     return out
 
 class BIDSReader:
-    DEFAULT_ROOT = "/data/LTP_BIDS"
-    INTRACRANIAL_FIELDS = ("subject", "task", "session", "eeg_type")
-    SCALP_FIELDS = ("subject", "task", "session", "eeg_type")
-    VALID_EEG_TYPES = ("eeg", "ieeg")
-    # VALID_SPACES = ("MNI152NLin6ASym", "Talarich", "CapTrak")
-    VALID_ACQ = ("bipolar", "monopolar")
-
     def __init__(
         self,
         root: Optional[Union[str, Path]] = None,
@@ -181,15 +157,15 @@ class BIDSReader:
         acquisition: Optional[str] = None,
         eeg_type: Optional[str] = None,
     ):
-        self.root = Path(root) if root is not None else Path(self.DEFAULT_ROOT)
+        self.root = Path(root) if root is not None else Path(DEFAULT_ROOT)
         self.subject = subject
         self.session = session
         self.task = task
         
         self.acquisition = acquisition
         
-        self.eeg_type = _validate_option(
-            "eeg_type", eeg_type, self.VALID_EEG_TYPES
+        self.eeg_type = validate_option(
+            "eeg_type", eeg_type, VALID_EEG_TYPES
         )
         
         self._space = space
@@ -221,16 +197,11 @@ class BIDSReader:
 
     # ---------- property ----------
     @property
-    def space(self):
-        if self._space is not None:
-            return self._space
-
-        try:
+    def space(self) -> str:
+        if self._space is None:
             self._space = self._determine_space()
-            return self._space
-        except Exception:
-            raise 
-            
+        return self._space
+    
     # ---------- internal helpers ----------
 
     def _bp(self, **kwargs) -> BIDSPath:
@@ -271,20 +242,19 @@ class BIDSReader:
         if acquisition is None:
             raise ValueError("acquisition was not set to bipolar, monopolar")
 
-        return _validate_option("acquisition", acquisition, self.VALID_ACQ)
+        return validate_option("acquisition", acquisition, VALID_ACQ)
     
     def _require(self, fields: Iterable[str], context: str = "") -> None:
         missing = [f for f in fields if getattr(self, f, None) in (None, "")]
         if missing:
-            prefix = f"{context}: " if context else ""
-            raise ValueError(
-                prefix + "One or more required fields were not set: " + ", ".join(missing)
+            raise MissingRequiredFieldError(
+                f"{context}: missing required fields: {', '.join(missing)}"
             )
             
     def _get_needed_fields(self):
-        return self.INTRACRANIAL_FIELDS if self.is_intracranial() else self.SCALP_FIELDS
+        return INTRACRANIAL_FIELDS if self.is_intracranial() else SCALP_FIELDS
     
-    def _attach_bipolar_midpoint_montage(self, raw) -> None:
+    def _attach_bipolar_midpoint_montage(self, raw: mne.io.BaseRaw) -> None:
         pairs_df = self.load_channels("bipolar")
         elec_df = self.load_electrodes()
         combo = _combine_bipolar_electrodes(pairs_df, elec_df)
@@ -339,15 +309,16 @@ class BIDSReader:
         return space
 
     # ---------- public API ----------
-    def is_intracranial(self):
+    @public_api
+    def is_intracranial(self) -> bool:
         return self.eeg_type == "ieeg"
     
     # ---------- loaders ----------
-
+    @public_api
     def load_events(self, event_type: str) -> pd.DataFrame:
         self._require(self._get_needed_fields(), context="load_events")
-        allowed = ["beh", *self.VALID_EEG_TYPES] 
-        event_type = _validate_option("event_type", event_type, allowed)
+        allowed = ["beh", *VALID_EEG_TYPES] 
+        event_type = validate_option("event_type", event_type, allowed)
         suffix = "beh" if event_type == "beh" else "events"
 
         bp = self._bp(
@@ -362,7 +333,7 @@ class BIDSReader:
 
         return pd.read_csv(matches[0].fpath, sep="\t")
 
-
+    @public_api
     def load_electrodes(self) -> pd.DataFrame:
         self._require(self._get_needed_fields(), context="load_electrodes")
 
@@ -372,6 +343,7 @@ class BIDSReader:
         bp = self._bp(datatype=self.eeg_type, suffix="electrodes", space=self._space, task=_task, extension=".tsv")
         return pd.read_csv(bp.fpath, sep="\t")
 
+    @public_api
     def load_channels(self, acquisition: Optional[str] = None) -> pd.DataFrame:
         self._require(self._get_needed_fields(), context="load_channels")
 
@@ -379,7 +351,7 @@ class BIDSReader:
         bp = self._bp(datatype=self.eeg_type, suffix="channels", acquisition=acq, extension=".tsv")
         return pd.read_csv(bp.fpath, sep="\t")
 
-
+    @public_api
     def load_combined_channels(self, acquisition: Optional[str] = None) -> pd.DataFrame:
         self._require(self._get_needed_fields(), context="load_combined_channels")
         acq = self._validate_acq(acquisition)  # returns None for scalp EEG, validates/raises for iEEG
@@ -391,7 +363,8 @@ class BIDSReader:
         if acquisition == "bipolar":
             return _combine_bipolar_electrodes(channel_df, elec_df)
 
-    def load_coordsystem_desc(self) -> dict:
+    @public_api
+    def load_coordsystem_desc(self) -> Dict:
         self._require(self._get_needed_fields(), context="load_coordsystem")
         self._space = self._determine_space() if self._space is None else self._space
 
@@ -402,7 +375,8 @@ class BIDSReader:
         with open(bp.fpath, "r") as f:
             return json.load(f)
 
-    def load_raw(self, acquisition: Optional[str] = None):
+    @public_api
+    def load_raw(self, acquisition: Optional[str] = None) -> mne.io.BaseRaw:
         self._require(self._get_needed_fields(), context="load_raw")
 
         acq = self._validate_acq(acquisition)  # None for scalp EEG; validated for iEEG
@@ -432,8 +406,8 @@ class BIDSReader:
 
         return raw
 
-
-    def load_epochs(self, tmin, tmax, trial_types=None, baseline=None, acquisition=None, event_repeated="merge", channels=None, preload=False):
+    @public_api
+    def load_epochs(self, tmin: float, tmax : float, trial_types: Optional[Iterable[str]] = None, baseline: Optional[Tuple[float | None, float | None]] = None, acquisition: Optional[str] =None, event_repeated: str = "merge", channels: Optional[Iterable[str]] = None, preload: bool = False) -> mne.Epochs:
         self._require(self._get_needed_fields(), context="load_epochs")
         raw = self.load_raw(acquisition = acquisition)
         events_raw, event_id = mne.events_from_annotations(raw)
@@ -456,29 +430,32 @@ class BIDSReader:
         )
     
     # ---- simple metadata queries ----
-    def get_subject_tasks(self):
+    @public_api
+    def get_subject_tasks(self) -> List[str]:
         # subject root = root/sub-XX (not session-specific)
         subject_root = self._subject_root()
         return get_entity_vals(subject_root, "task")
 
-    def get_subject_sessions(self):
+    @public_api
+    def get_subject_sessions(self) -> List[str]:
         subject_root = self._subject_root()
         return get_entity_vals(subject_root, "session")
     
-    def get_dataset_subjects(self):
+    @public_api
+    def get_dataset_subjects(self) -> List[str]:
         return get_entity_vals(self.root, "subject")
 
-
-    def get_dataset_tasks(self):
+    @public_api
+    def get_dataset_tasks(self) -> List[str]:
         return get_entity_vals(self.root, "task")
 
-
-    def get_dataset_max_sessions(self, outlier_thresh=None) -> Optional[int]:
+    @public_api
+    def get_dataset_max_sessions(self, outlier_thresh: Optional[int] = None) -> Optional[int]:
         subs = self.get_dataset_subjects()
         max_ses: Optional[int] = None
 
         for sub in subs:
-            subject_root = self.root / self._add_bids_prefix("subject", self.subject)
+            subject_root = self.root / f"sub-{str(sub).replace('sub-', '')}"
             sessions = get_entity_vals(subject_root, "session") or []
 
             for s in sessions:
@@ -496,12 +473,14 @@ class BIDSReader:
     
     # ----static methods ----
     @staticmethod
-    def mne_to_ptsa(epochs, events_df):
+    @public_api
+    def mne_to_ptsa(epochs: mne.Epochs, events_df: pd.Dataframe) -> TimeSeries:
         merged_events_df = _merge_duplicate_sample_events(events_df)
         return TimeSeries.from_mne_epochs(epochs, merged_events_df)
     
     @staticmethod
-    def raw_to_ptsa(raw, picks=None, tmin=None, tmax=None) -> TimeSeries:
+    @public_api
+    def raw_to_ptsa(raw : raw.io.BaseRaw, picks: Optional[Iterable[str]] = None, tmin: float = None, tmax: float = None) -> TimeSeries:
         inst = raw.copy()
         if tmin is not None or tmax is not None:
             # MNE crop uses absolute times in seconds within the recording
@@ -538,9 +517,9 @@ class BIDSReader:
         )
         return ts
 
-    
     @staticmethod
-    def filter_events_by_trial_types(trial_types, events_df=None, raw=None):
+    @public_api
+    def filter_events_by_trial_types(trial_types: Iterable[str], events_df: pd.Dataframe = None, raw: mne.io.BaseRaw = None) -> Tuple[pd.DataFrame | None, np.ndarray | None, Dict[str, int] | None]:
         trial_types = set(trial_types)
 
         filtered_events_df = None
