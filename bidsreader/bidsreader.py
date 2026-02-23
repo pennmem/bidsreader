@@ -4,147 +4,13 @@ from mne_bids import BIDSPath, read_raw_bids, get_entity_vals
 import mne
 from ptsa.data.timeseries import TimeSeries
 from pathlib import Path
-from typing import Iterable, Any, Tuple, Sequence, Optional, Union, Dict
-import re
-import numpy as np
-import pandas as pd
+from typing import Iterable, Tuple, Optional, Union, Dict, List
 import warnings
 import json
 from .constants import CML_ROOT, INTRACRANIAL_FIELDS, SCALP_FIELDS, VALID_EEG_TYPES, VALID_ACQ
 from ._errorwrap import public_api
-from .util import validate_option
-
-### NEED TO ADD SCALP SUPORT TO LOAD ELECTRODES, CHANNELS, ALSO ADD SUPPORT FOR SHOW JSON FOR eeg, events, and coordsystem
-
-# modular level helpers
-def _space_from_coordsystem_fname(fname: str) -> Optional[str]:
-    if "_space-" not in fname:
-        return None
-    return fname.split("_space-")[1].split("_coordsystem.json")[0]
-
-def _add_prefix(value: Optional[str], prefix: str) -> Optional[str]:
-    if value is None:
-        return None
-
-    value = str(value)
-
-    # Avoid double-prefixing
-    if value.startswith(prefix):
-        return value
-
-    return f"{prefix}{value}"
-
-def _merge_duplicate_sample_events(evs: pd.DataFrame, sample_col: str = "sample") -> pd.DataFrame:
-    df = evs.copy()
-
-    # Ensure stable ordering so "first" is well-defined.
-    df["_orig_order"] = np.arange(len(df))
-
-    def first_non_nan(s: pd.Series):
-        s2 = s.dropna()
-        return s2.iloc[0] if len(s2) else np.nan
-
-    def merge_series(s: pd.Series):
-        # General "take the first non-NaN; if only one non-NaN, that's what it is" behavior
-        return first_non_nan(s)
-
-    def merge_trial_type(s: pd.Series):
-        vals = [v for v in s.tolist() if pd.notna(v)]
-        # preserve order but avoid duplicates like A/A
-        uniq = []
-        for v in vals:
-            if v not in uniq:
-                uniq.append(v)
-        if not uniq:
-            return np.nan
-        return "/".join(map(str, uniq))
-
-    merged_rows = []
-    for sample_val, g in df.sort_values("_orig_order").groupby(sample_col, sort=False):
-        out = {}
-        for col in df.columns:
-            if col in ("_orig_order",):
-                continue
-            if col == "trial_type":
-                out[col] = merge_trial_type(g[col])
-            else:
-                out[col] = merge_series(g[col])
-        merged_rows.append(out)
-
-    out_df = pd.DataFrame(merged_rows)
-
-    # If you want to preserve original column order (minus helper col)
-    out_df = out_df[[c for c in evs.columns if c in out_df.columns]]
-
-    return out_df
-
-def _find_coord_triplets(columns: Sequence[str]) -> Dict[str, Tuple[str, str, str]]:
-        cols = set(columns)
-
-        triplets = {}
-
-        if {"x", "y", "z"} <= cols:
-            triplets[""] = ("x", "y", "z")
-
-        prefixed = [c for c in cols if re.match(r"^.+\.(x|y|z)$", c)]
-        prefixes = set(c.rsplit(".", 1)[0] for c in prefixed)
-
-        for p in prefixes:
-            x, y, z = f"{p}.x", f"{p}.y", f"{p}.z"
-            if {x, y, z} <= cols:
-                triplets[p] = (x, y, z)
-
-        return triplets
-
-def _combine_bipolar_electrodes(
-        pairs_df: pd.DataFrame,
-        elec_df: pd.DataFrame,
-        pair_col: str = "name",
-        elec_name_col: str = "name",
-        region_cols: Sequence[str] = ("wb.region", "ind.region", "stein.region"),
-    ) -> pd.DataFrame:
-    sep = "-"
-    out = pairs_df.copy()
-
-    # Split bipolar pair
-    ch = out[pair_col].astype(str).str.split(sep, n=1, expand=True)
-    out["ch1"] = ch[0].str.strip()
-    out["ch2"] = ch[1].str.strip()
-
-    # Detect all coordinate triplets present in electrodes df
-    coord_triplets = _find_coord_triplets(elec_df.columns)
-
-    # Keep electrode name + region cols + all coordinate columns we found
-    coord_cols = [c for trip in coord_triplets.values() for c in trip]
-    keep_cols = [elec_name_col, *region_cols, *coord_cols]
-    keep_cols = [c for c in keep_cols if c in elec_df.columns]  # safety
-
-    look = elec_df[keep_cols].copy()
-
-    # Merge ch1 metadata
-    look1 = look.add_suffix("_ch1").rename(columns={f"{elec_name_col}_ch1": "ch1"})
-    out = out.merge(look1, on="ch1", how="left")
-
-    # Merge ch2 metadata
-    look2 = look.add_suffix("_ch2").rename(columns={f"{elec_name_col}_ch2": "ch2"})
-    out = out.merge(look2, on="ch2", how="left")
-
-    # Region agreement
-    for rc in region_cols:
-        if f"{rc}_ch1" in out.columns and f"{rc}_ch2" in out.columns:
-            a = out[f"{rc}_ch1"]
-            b = out[f"{rc}_ch2"]
-            out[f"{rc}_pair"] = np.where(a.notna() & (a == b), a, np.nan)
-
-    # Midpoints for every detected coordinate triplet
-    for prefix, (xcol, ycol, zcol) in coord_triplets.items():
-        for col in (xcol, ycol, zcol):
-            a = out[f"{col}_ch1"]
-            b = out[f"{col}_ch2"]
-            mid_name = f"{col}_mid"  # e.g., "x_mid" or "tal.x_mid"
-            out[mid_name] = np.where(a.notna() & b.notna(), (a + b) / 2.0, np.nan)
-
-    return out
+from .helpers import validate_option, space_from_coordsystem_fname, add_prefix, merge_duplicate_sample_events, combine_bipolar_electrodes
+from .exc import BIDSReaderError, InvalidOptionError, MissingRequiredFieldError, FileNotFoundBIDSError, AmbiguousMatchError, DataParseError, DependencyError, ExternalLibraryError
 
 class BIDSReader:
     def __init__(
@@ -229,9 +95,9 @@ class BIDSReader:
         }
 
         if field not in prefix_map:
-            raise ValueError(f"Unknown BIDS field: {field}")
+            raise InvalidOptionError(f"Unknown BIDS field: {field}")
 
-        return _add_prefix(value, prefix_map[field])
+        return add_prefix(value, prefix_map[field])
 
     
     def _validate_acq(self, acquisition: Optional[str]) -> Optional[str]:
@@ -240,7 +106,7 @@ class BIDSReader:
             return None
 
         if acquisition is None:
-            raise ValueError("acquisition was not set to bipolar, monopolar")
+            raise InvalidOptionError("acquisition was not set to bipolar, monopolar")
 
         return validate_option("acquisition", acquisition, VALID_ACQ)
     
@@ -257,7 +123,7 @@ class BIDSReader:
     def _attach_bipolar_midpoint_montage(self, raw: mne.io.BaseRaw) -> None:
         pairs_df = self.load_channels("bipolar")
         elec_df = self.load_electrodes()
-        combo = _combine_bipolar_electrodes(pairs_df, elec_df)
+        combo = combine_bipolar_electrodes(pairs_df, elec_df)
 
         if not {"name", "x_mid", "y_mid", "z_mid"}.issubset(combo.columns):
             return
@@ -278,7 +144,7 @@ class BIDSReader:
         data_dir = subject_root / self._add_bids_prefix("session", self.session) / self.eeg_type
 
         if not data_dir.exists():
-            raise FileNotFoundError(
+            raise FileNotFoundBIDSError(
                 f"determine_space: data directory does not exist.\n"
                 f"subject_root={subject_root}\n"
                 f"data_dir={data_dir}"
@@ -286,22 +152,22 @@ class BIDSReader:
 
         matches = list(data_dir.glob("*_coordsystem.json"))
         if not matches:
-            raise FileNotFoundError(
+            raise FileNotFoundBIDSError(
                 f"determine_space: no *_coordsystem.json file found.\n"
                 f"data_dir={data_dir}"
             )
 
         if len(matches) > 1:
-            raise ValueError(
+            raise AmbiguousMatchError(
                 f"determine_space: multiple coordsystem files found.\n"
                 f"files={[m.name for m in matches]}"
             )
 
         fname = matches[0].name
-        space = _space_from_coordsystem_fname(fname)
+        space = space_from_coordsystem_fname(fname)
 
         if space is None:
-            raise ValueError(
+            raise DataParseError(
                 f"determine_space: could not parse space from filename.\n"
                 f"filename={fname}"
             )
@@ -329,7 +195,7 @@ class BIDSReader:
 
         matches = bp.match()
         if not matches:
-            raise ValueError(f"load_events: no file matched for {bp}")
+            raise FileNotFoundBIDSError(f"load_events: no file matched for {bp}")
 
         return pd.read_csv(matches[0].fpath, sep="\t")
 
@@ -354,14 +220,14 @@ class BIDSReader:
     @public_api
     def load_combined_channels(self, acquisition: Optional[str] = None) -> pd.DataFrame:
         self._require(self._get_needed_fields(), context="load_combined_channels")
-        acq = self._validate_acq(acquisition)  # returns None for scalp EEG, validates/raises for iEEG
+        acq = self._validate_acq(acquisition)
         
         channel_df = self.load_channels(acquisition)
         elec_df = self.load_electrodes()
         if acquisition == "monopolar" or acquisition is None:
             return channel_df.merge( elec_df, on="name", how="left", suffixes=("", "_elec"), )
         if acquisition == "bipolar":
-            return _combine_bipolar_electrodes(channel_df, elec_df)
+            return combine_bipolar_electrodes(channel_df, elec_df)
 
     @public_api
     def load_coordsystem_desc(self) -> Dict:
@@ -474,13 +340,13 @@ class BIDSReader:
     # ----static methods ----
     @staticmethod
     @public_api
-    def mne_to_ptsa(epochs: mne.Epochs, events_df: pd.Dataframe) -> TimeSeries:
-        merged_events_df = _merge_duplicate_sample_events(events_df)
+    def mne_to_ptsa(epochs: mne.Epochs, events_df: pd.DataFrame) -> TimeSeries:
+        merged_events_df = merge_duplicate_sample_events(events_df)
         return TimeSeries.from_mne_epochs(epochs, merged_events_df)
     
     @staticmethod
     @public_api
-    def raw_to_ptsa(raw : raw.io.BaseRaw, picks: Optional[Iterable[str]] = None, tmin: float = None, tmax: float = None) -> TimeSeries:
+    def raw_to_ptsa(raw : mne.io.BaseRaw, picks: Optional[Iterable[str]] = None, tmin: float = None, tmax: float = None) -> TimeSeries:
         inst = raw.copy()
         if tmin is not None or tmax is not None:
             # MNE crop uses absolute times in seconds within the recording
@@ -519,7 +385,7 @@ class BIDSReader:
 
     @staticmethod
     @public_api
-    def filter_events_by_trial_types(trial_types: Iterable[str], events_df: pd.Dataframe = None, raw: mne.io.BaseRaw = None) -> Tuple[pd.DataFrame | None, np.ndarray | None, Dict[str, int] | None]:
+    def filter_events_by_trial_types(trial_types: Iterable[str], events_df: pd.DataFrame = None, raw: mne.io.BaseRaw = None) -> Tuple[pd.DataFrame | None, np.ndarray | None, Dict[str, int] | None]:
         trial_types = set(trial_types)
 
         filtered_events_df = None

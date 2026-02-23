@@ -2,19 +2,16 @@ class BIDSReaderError(Exception):
     """ Generic exception for all BIDS Reader exceptions """
 
 class InvalidOptionError(BIDSReaderError, ValueError):
-    pass
+    """ Raised when an input is not among options. """
 
 class MissingRequiredFieldError(BIDSReaderError, ValueError):
-     """ Raised when a required field is missing when loading file using BIDSPath """
+     """ Raised when a required field is missing when loading file using BIDSPath. """
 
-class FileResolutionError(BIDSReaderError):
-    pass
+class FileNotFoundBIDSError(FileNotFoundError):
+    """ Raised when a BIDS file is not found. """
 
-class FileNotFoundBIDSError(FileResolutionError, FileNotFoundError):
-    pass
-
-class AmbiguousMatchError(FileResolutionError):
-    pass
+class AmbiguousMatchError(Exception):
+    """ Raised when multiple files are returned when searching. """
 
 class DataParseError(BIDSReaderError):
     """TSV/JSON parsing, schema issues, etc."""
