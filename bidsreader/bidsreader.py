@@ -23,7 +23,7 @@ class BIDSReader:
         acquisition: Optional[str] = None,
         eeg_type: Optional[str] = None,
     ):
-        self.root = Path(root) if root is not None else Path(DEFAULT_ROOT)
+        self.root = Path(root) if root is not None else Path(CML_ROOT)
         self.subject = subject
         self.session = session
         self.task = task
