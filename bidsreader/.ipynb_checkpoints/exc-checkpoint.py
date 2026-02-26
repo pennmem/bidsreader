@@ -7,10 +7,10 @@ class InvalidOptionError(BIDSReaderError, ValueError):
 class MissingRequiredFieldError(BIDSReaderError, ValueError):
      """ Raised when a required field is missing when loading file using BIDSPath. """
 
-class FileNotFoundBIDSError(FileNotFoundError):
+class FileNotFoundBIDSError(BIDSReaderError, FileNotFoundError):
     """ Raised when a BIDS file is not found. """
 
-class AmbiguousMatchError(Exception):
+class AmbiguousMatchError(BIDSReaderError, Exception):
     """ Raised when multiple files are returned when searching. """
 
 class DataParseError(BIDSReaderError):

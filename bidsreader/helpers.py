@@ -138,3 +138,11 @@ def combine_bipolar_electrodes(
             out[mid_name] = np.where(a.notna() & b.notna(), (a + b) / 2.0, np.nan)
 
     return out
+
+def normalize_trial_types(trial_types: Iterable[str]) -> set[str]:
+    return {str(t) for t in trial_types}
+
+def match_event_label(label: str, trial_types: list[str]) -> bool:
+    # exact token match within merged labels like "WORD/STIM"
+    tokens = label.split("/")
+    return any(t in tokens for t in trial_types)
