@@ -326,17 +326,76 @@ class BIDSReader:
 
         return raw
 
-    @public_api
-    def load_epochs(self, tmin: float, tmax : float, trial_types: Optional[Iterable[str]] = None, baseline: Optional[Tuple[float | None, float | None]] = None, acquisition: Optional[str] =None, event_repeated: str = "merge", channels: Optional[Iterable[str]] = None, preload: bool = False) -> mne.Epochs:
-        self._require(self._get_needed_fields(), context="load_epochs")
-        raw = self.load_raw(acquisition = acquisition)
-        events_raw, event_id = mne.events_from_annotations(raw)
+#     @public_api
+#     def load_epochs(self, tmin: float, tmax : float, trial_types: Optional[Iterable[str]] = None, baseline: Optional[Tuple[float | None, float | None]] = None, acquisition: Optional[str] =None, event_repeated: str = "merge", channels: Optional[Iterable[str]] = None, preload: bool = False) -> mne.Epochs:
+#         self._require(self._get_needed_fields(), context="load_epochs")
+#         raw = self.load_raw(acquisition = acquisition)
+#         events_raw, event_id = mne.events_from_annotations(raw)
         
-        if trial_types is not None:
-            events_raw, event_id, _ = self.filter_raw_events_by_trial_types(trial_types=trial_types, raw=raw)
+#         if trial_types is not None:
+#             events_raw, event_id, _ = self.filter_raw_events_by_trial_types(trial_types=trial_types, raw=raw)
             
-        picks = list(channels) if channels is not None else None
+#         picks = list(channels) if channels is not None else None
 
+#         return mne.Epochs(
+#             raw,
+#             events=events_raw,
+#             event_id=event_id,
+#             tmin=tmin,
+#             tmax=tmax,
+#             baseline=baseline,
+#             preload=preload,
+#             event_repeated=event_repeated,
+#             picks=picks
+#         )
+    @public_api
+    def load_epochs(
+        self,
+        tmin: float,
+        tmax: float,
+        events: Optional[pd.DataFrame] = None,
+        baseline: Optional[Tuple[float | None, float | None]] = None,
+        acquisition: Optional[str] = None,
+        event_repeated: str = "merge",
+        channels: Optional[Iterable[str]] = None,
+        preload: bool = False,
+    ) -> mne.Epochs:
+        self._require(self._get_needed_fields(), context="load_epochs")
+        raw = self.load_raw(acquisition=acquisition)
+
+        # Always derive the canonical event_id mapping from the raw annotations
+        all_events_raw, all_event_id = mne.events_from_annotations(raw)
+
+        if events is not None:
+            if "sample" not in events.columns:
+                raise ValueError("Events DataFrame must contain a 'sample' column")
+
+            # Use the same integer codes that events_from_annotations would assign
+            if "trial_type" in events.columns:
+                codes = events["trial_type"].map(all_event_id)
+                if codes.isna().any():
+                    missing = set(events.loc[codes.isna(), "trial_type"].unique())
+                    raise ValueError(
+                        f"trial_type values not found in raw annotations: {missing}"
+                    )
+                codes = codes.values.astype(int)
+                # Only keep event_id entries for types present in the passed events
+                present_types = set(events["trial_type"].unique())
+                event_id = {k: v for k, v in all_event_id.items() if k in present_types}
+            else:
+                codes = np.ones(len(events), dtype=int)
+                event_id = {"event": 1}
+
+            events_raw = np.column_stack([
+                events["sample"].values.astype(int),
+                np.zeros(len(events), dtype=int),
+                codes,
+            ])
+        else:
+            events_raw = all_events_raw
+            event_id = all_event_id
+
+        picks = list(channels) if channels is not None else None
         return mne.Epochs(
             raw,
             events=events_raw,
@@ -346,7 +405,7 @@ class BIDSReader:
             baseline=baseline,
             preload=preload,
             event_repeated=event_repeated,
-            picks=picks
+            picks=picks,
         )
     
     # ---- simple metadata queries ----
@@ -394,9 +453,9 @@ class BIDSReader:
     # ----static methods ----
     @staticmethod
     @public_api
-    def mne_epochs_to_ptsa(epochs: mne.Epochs, events_df: pd.DataFrame) -> TimeSeries:
-        merged_events_df = merge_duplicate_sample_events(events_df)
-        return TimeSeries.from_mne_epochs(epochs, merged_events_df)
+    def mne_epochs_to_ptsa(epochs: mne.Epochs, events: pd.DataFrame) -> TimeSeries:
+        events = merge_duplicate_sample_events(events)
+        return TimeSeries.from_mne_epochs(epochs, events)
     
     @staticmethod
     @public_api
