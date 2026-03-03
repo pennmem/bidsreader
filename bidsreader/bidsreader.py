@@ -326,28 +326,7 @@ class BIDSReader:
 
         return raw
 
-#     @public_api
-#     def load_epochs(self, tmin: float, tmax : float, trial_types: Optional[Iterable[str]] = None, baseline: Optional[Tuple[float | None, float | None]] = None, acquisition: Optional[str] =None, event_repeated: str = "merge", channels: Optional[Iterable[str]] = None, preload: bool = False) -> mne.Epochs:
-#         self._require(self._get_needed_fields(), context="load_epochs")
-#         raw = self.load_raw(acquisition = acquisition)
-#         events_raw, event_id = mne.events_from_annotations(raw)
-        
-#         if trial_types is not None:
-#             events_raw, event_id, _ = self.filter_raw_events_by_trial_types(trial_types=trial_types, raw=raw)
-            
-#         picks = list(channels) if channels is not None else None
 
-#         return mne.Epochs(
-#             raw,
-#             events=events_raw,
-#             event_id=event_id,
-#             tmin=tmin,
-#             tmax=tmax,
-#             baseline=baseline,
-#             preload=preload,
-#             event_repeated=event_repeated,
-#             picks=picks
-#         )
     @public_api
     def load_epochs(
         self,
@@ -672,110 +651,257 @@ class BIDSReader:
         filtered_event_idx = np.arange(n, dtype=int)
         return filtered_df, filtered_events, filtered_epochs, filtered_event_id, filtered_event_idx
 
-#     @staticmethod
-#     def _label_has_trial_type(label: str, trial_types: list[str]) -> bool:
-#         # only match whole tokens in merged labels (split by "/")
-#         tokens = label.split("/")
-#         return any(t in tokens for t in trial_types)
+    # ---------- unit constants (class-level) ----------
+    _UNIT_EXPONENTS = {
+        "V": 0, "mV": -3, "uV": -6, "nV": -9,
+        "T": 0, "mT": -3, "uT": -6, "nT": -9, "fT": -15,
+    }
 
-#     @staticmethod
-#     @public_api
-#     def filter_events_df_by_trial_types(
-#         events_df: pd.DataFrame,
-#         trial_types: Iterable[str] | str,
-#     ) -> pd.DataFrame:
-#         tt = BIDSReader._ensure_list(trial_types)
-#         return events_df.loc[events_df["trial_type"].isin(tt)].copy()
+    _FIFF_UNIT_TO_BASE = {107: "V", 201: "T", 0: None}
 
-#     @staticmethod
-#     @public_api
-#     def filter_raw_events_by_trial_types(
-#         raw: mne.io.BaseRaw,
-#         trial_types: Iterable[str] | str,
-#     ):
-#         tt = BIDSReader._ensure_list(trial_types)
-#         raw = raw.copy()
-#         events_raw, event_id = mne.events_from_annotations(raw)
+    _FIFF_MUL_TO_EXP = {
+        0: 0, -3: -3, -6: -6, -9: -9, -12: -12, -15: -15, 3: 3, 6: 6,
+    }
 
-#         filtered_event_id = {
-#             k: v for k, v in event_id.items()
-#             if BIDSReader._label_has_trial_type(k, tt)
-#         }
+    _EXP_TO_PREFIX = {
+        0: "", -3: "m", -6: "u", -9: "n", -12: "p", -15: "f", 3: "k", 6: "M",
+    }
 
-#         if filtered_event_id:
-#             codes = np.fromiter(filtered_event_id.values(), dtype=int)
-#             filtered_events = events_raw[np.isin(events_raw[:, 2], codes)]
-#         else:
-#             filtered_events = events_raw[:0].copy()
-#             filtered_event_id = {}
+    # ---------- unit internal helpers ----------
 
-#         return filtered_events, filtered_event_id
+    @staticmethod
+    def _normalize_unit(unit: str) -> str:
+        return unit.replace("µ", "u")
 
-#     @staticmethod
-#     @public_api
-#     def filter_epochs_by_trial_types(
-#         epochs: mne.Epochs,
-#         trial_types: Iterable[str] | str,
-#     ):
-#         tt = BIDSReader._ensure_list(trial_types)
-#         epochs = epochs.copy()
-#         keys = [
-#             k for k in epochs.event_id.keys()
-#             if BIDSReader._label_has_trial_type(k, tt)
-#         ]
+    @staticmethod
+    def _detect_unit_mne(inst: Union[mne.io.BaseRaw, mne.Epochs]) -> str:
+        """Detect unit string from an MNE Raw or Epochs object."""
+        eeg_types = {"eeg", "seeg", "ecog", "ieeg", "dbs"}
 
-#         filtered_epochs = epochs[keys] if keys else epochs.copy()[[]]
-#         filtered_event_id = {k: epochs.event_id[k] for k in keys}
+        for ch_info in inst.info["chs"]:
+            ch_kind = mne.io.pick.channel_type(
+                inst.info, inst.ch_names.index(ch_info["ch_name"]),
+            )
+            if ch_kind not in eeg_types:
+                continue
 
-#         return filtered_epochs, filtered_event_id
+            fiff_unit = ch_info.get("unit", 0)
+            fiff_mul = ch_info.get("unit_mul", 0)
 
-#     @staticmethod
-#     @public_api
-#     def filter_by_trial_types(
-#         trial_types: Iterable[str] | str,
-#         *,
-#         events_df: Optional[pd.DataFrame] = None,
-#         raw: Optional[mne.io.BaseRaw] = None,
-#         epochs: Optional[mne.Epochs] = None,
-#     ) -> tuple[
-#         Optional[pd.DataFrame],
-#         Optional[np.ndarray],
-#         Optional[mne.Epochs],
-#         Dict[str, int],
-#     ]:
-#         tt = BIDSReader._ensure_list(trial_types)
+            base = BIDSReader._FIFF_UNIT_TO_BASE.get(fiff_unit)
+            if base is None:
+                raise ValueError(
+                    f"Unknown FIFF unit code {fiff_unit} on channel "
+                    f"'{ch_info['ch_name']}'. Pass current_unit= explicitly."
+                )
 
-#         filtered_df = None
-#         filtered_events = None
-#         filtered_epochs = None
+            exp = BIDSReader._FIFF_MUL_TO_EXP.get(fiff_mul, 0)
+            prefix = BIDSReader._EXP_TO_PREFIX.get(exp, "")
+            return f"{prefix}{base}"
 
-#         event_id_raw: Optional[Dict[str, int]] = None
-#         event_id_epochs: Optional[Dict[str, int]] = None
+        raise ValueError(
+            "No EEG/iEEG/SEEG/ECoG channel found. Cannot detect unit."
+        )
 
-#         if events_df is not None:
-#             filtered_df = BIDSReader.filter_events_df_by_trial_types(events_df, tt)
+    @staticmethod
+    def _detect_unit_ptsa(ts: TimeSeries) -> str:
+        """Detect unit string from a PTSA TimeSeries."""
+        for key in ("units", "unit"):
+            val = ts.attrs.get(key)
+            if val is not None and str(val).strip():
+                unit_str = BIDSReader._normalize_unit(str(val).strip())
+                if unit_str in BIDSReader._UNIT_EXPONENTS:
+                    return unit_str
+                raise ValueError(
+                    f"TimeSeries has unit '{val}' which is not recognized. "
+                    f"Known: {sorted(BIDSReader._UNIT_EXPONENTS.keys())}"
+                )
 
-#         if raw is not None:
-#             filtered_events, event_id_raw = BIDSReader.filter_raw_events_by_trial_types(raw, tt)
+        raise ValueError(
+            "TimeSeries has no 'units' or 'unit' attribute. "
+            "Pass current_unit= explicitly."
+        )
 
-#         if epochs is not None:
-#             filtered_epochs, event_id_epochs = BIDSReader.filter_epochs_by_trial_types(epochs, tt)
+    @staticmethod
+    def _convert_mne(
+        inst: Union[mne.io.BaseRaw, mne.Epochs],
+        factor: float,
+        target_unit: str,
+        copy: bool,
+    ) -> Union[mne.io.BaseRaw, mne.Epochs]:
+        """Scale MNE data and update FIFF unit metadata."""
+        if copy:
+            inst = inst.copy()
 
-#         # Consistency check: compare KEYS (codes can differ)
-#         if event_id_raw is not None and event_id_epochs is not None:
-#             if set(event_id_raw.keys()) != set(event_id_epochs.keys()):
-#                 raise ValueError(
-#                     "filtered_event_id key mismatch between raw and epochs.\n"
-#                     f"raw keys={sorted(event_id_raw.keys())}\n"
-#                     f"epochs keys={sorted(event_id_epochs.keys())}"
-#                 )
-#             # pick one (codes may differ, keys match)
-#             filtered_event_id = event_id_raw
-#         elif event_id_raw is not None:
-#             filtered_event_id = event_id_raw
-#         elif event_id_epochs is not None:
-#             filtered_event_id = event_id_epochs
-#         else:
-#             filtered_event_id = {}
+        inst.apply_function(lambda x: x * factor, picks="all", channel_wise=False)
 
-#         return filtered_df, filtered_events, filtered_epochs, filtered_event_id
+        base_char = target_unit[-1]
+        target_exp = BIDSReader._UNIT_EXPONENTS[target_unit]
+        fiff_unit_code = {"V": 107, "T": 201}.get(base_char, 0)
+        fiff_mul = min(
+            BIDSReader._FIFF_MUL_TO_EXP.keys(),
+            key=lambda k: abs(BIDSReader._FIFF_MUL_TO_EXP[k] - target_exp),
+        )
+
+        # Update unit metadata on all EEG/SEEG/ECoG channels
+        eeg_kinds = {2, 302, 802, 803}  # EEG, EEG_REF, SEEG, ECOG
+        for ch in inst.info["chs"]:
+            if ch.get("kind", 0) in eeg_kinds or ch.get("unit", 0) in (107, 201):
+                ch["unit"] = fiff_unit_code
+                ch["unit_mul"] = fiff_mul
+
+        return inst
+
+    @staticmethod
+    def _convert_ptsa(
+        ts: TimeSeries,
+        factor: float,
+        target_unit: str,
+        copy: bool,
+    ) -> TimeSeries:
+        """Scale PTSA TimeSeries data and update attrs."""
+        if copy:
+            result = ts * factor
+        else:
+            ts.values[:] *= factor
+            result = ts
+
+        # Update all unit-related attrs so users know the current unit
+        result.attrs["units"] = target_unit
+        result.attrs["unit"] = target_unit
+
+        return result
+
+    # ---------- unit public API ----------
+
+    @staticmethod
+    @public_api
+    def detect_unit(
+        data: Union[mne.io.BaseRaw, mne.Epochs, TimeSeries],
+        current_unit: Optional[str] = None,
+    ) -> str:
+        """Detect or validate the unit of EEG data.
+
+        Parameters
+        ----------
+        data : mne.io.BaseRaw, mne.Epochs, or PTSA TimeSeries
+            The data object to inspect.
+        current_unit : str, optional
+            If provided, overrides auto-detection. Validated against
+            known units and returned directly.
+
+        Returns
+        -------
+        str
+            Unit string like "V", "mV", "uV", "nV", "T", etc.
+
+        Raises
+        ------
+        ValueError
+            If unit cannot be detected and current_unit is not provided.
+        """
+        if current_unit is not None:
+            normalized = BIDSReader._normalize_unit(current_unit)
+            if normalized not in BIDSReader._UNIT_EXPONENTS:
+                raise ValueError(
+                    f"Unknown unit '{current_unit}'. "
+                    f"Known: {sorted(BIDSReader._UNIT_EXPONENTS.keys())}"
+                )
+            return normalized
+
+        if isinstance(data, (mne.io.BaseRaw, mne.Epochs)):
+            return BIDSReader._detect_unit_mne(data)
+
+        if isinstance(data, TimeSeries):
+            return BIDSReader._detect_unit_ptsa(data)
+
+        raise TypeError(
+            f"Cannot detect unit from {type(data).__name__}. "
+            f"Expected mne.io.BaseRaw, mne.Epochs, or TimeSeries."
+        )
+
+    @staticmethod
+    @public_api
+    def get_scale_factor(from_unit: str, to_unit: str) -> float:
+        """Compute multiplicative factor to convert between units.
+
+        Parameters
+        ----------
+        from_unit : str
+            Current unit (e.g. "V").
+        to_unit : str
+            Target unit (e.g. "uV").
+
+        Returns
+        -------
+        float
+            Multiply data by this value to convert.
+
+        Examples
+        --------
+        >>> BIDSReader.get_scale_factor("V", "uV")
+        1000000.0
+        >>> BIDSReader.get_scale_factor("uV", "V")
+        1e-06
+        """
+        from_u = BIDSReader._normalize_unit(from_unit)
+        to_u = BIDSReader._normalize_unit(to_unit)
+
+        if from_u not in BIDSReader._UNIT_EXPONENTS:
+            raise ValueError(f"Unknown source unit '{from_unit}'")
+        if to_u not in BIDSReader._UNIT_EXPONENTS:
+            raise ValueError(f"Unknown target unit '{to_unit}'")
+
+        from_base = from_u[-1]
+        to_base = to_u[-1]
+        if from_base != to_base:
+            raise ValueError(
+                f"Cannot convert between different base units: "
+                f"'{from_unit}' ({from_base}) -> '{to_unit}' ({to_base})"
+            )
+
+        from_exp = BIDSReader._UNIT_EXPONENTS[from_u]
+        to_exp = BIDSReader._UNIT_EXPONENTS[to_u]
+        return 10.0 ** (from_exp - to_exp)
+
+    @staticmethod
+    @public_api
+    def convert_unit(
+        data: Union[mne.io.BaseRaw, mne.Epochs, TimeSeries],
+        target: str,
+        *,
+        current_unit: Optional[str] = None,
+        copy: bool = True,
+    ) -> Union[mne.io.BaseRaw, mne.Epochs, TimeSeries]:
+        """Convert EEG data to a target unit.
+
+        Parameters
+        ----------
+        data : mne.io.BaseRaw, mne.Epochs, or PTSA TimeSeries
+            The data to convert.
+        target : str
+            Target unit string (e.g. "uV", "mV", "V").
+        current_unit : str, optional
+            Override auto-detection of the current unit. Required if
+            the data object doesn't store unit metadata.
+        copy : bool
+            If True (default), return a copy. If False, modify in place.
+
+        Returns
+        -------
+        Same type as input, with data scaled to the target unit.
+        """
+        detected = BIDSReader.detect_unit(data, current_unit=current_unit)
+        target_normalized = BIDSReader._normalize_unit(target)
+        factor = BIDSReader.get_scale_factor(detected, target_normalized)
+
+        if factor == 1.0:
+            return data.copy() if copy else data
+
+        if isinstance(data, (mne.io.BaseRaw, mne.Epochs)):
+            return BIDSReader._convert_mne(data, factor, target_normalized, copy)
+
+        if isinstance(data, TimeSeries):
+            return BIDSReader._convert_ptsa(data, factor, target_normalized, copy)
+
+        raise TypeError(f"Cannot convert type {type(data).__name__}")
