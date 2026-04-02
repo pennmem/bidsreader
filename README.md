@@ -181,7 +181,7 @@ ts = mne_raw_to_ptsa(raw, picks=["E1", "E2"], tmin=0.0, tmax=10.0)
 
 ```
 BaseReader              # Abstract base — BIDS path construction, metadata queries, field validation
-└── CMLBIDSReader       # Concrete reader for the CML (Center for Memory and Language) dataset
+└── CMLBIDSReader       # Concrete reader for the CML (Computational Memory Lab) dataset
 ```
 
 ### Module overview
