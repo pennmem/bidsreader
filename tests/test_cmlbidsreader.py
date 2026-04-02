@@ -17,7 +17,7 @@ What is tested:
       - load_events, load_electrodes, load_channels, load_combined_channels
       - load_coordsystem_desc, load_raw, load_epochs
       - get_subject_sessions, get_subject_tasks
-    EEG (VCBehOnly, root=/data/LTP_BIDS/VCBehOnly):
+    EEG (ValueCourier, root=/data/LTP_BIDS/ValueCourier):
       - Auto-detected device and space
       - load_events, load_electrodes, load_channels
       - load_raw, load_epochs
@@ -40,7 +40,7 @@ from bidsreader.exc import (
 # Integration test paths and skip conditions
 # ---------------------------------------------------------------------------
 IEEG_ROOT = Path("/data/LTP_BIDS/FR1")
-EEG_ROOT = Path("/data/LTP_BIDS/VCBehOnly")
+EEG_ROOT = Path("/data/LTP_BIDS/ValueCourier")
 
 skip_no_ieeg = pytest.mark.skipif(
     not IEEG_ROOT.exists(), reason=f"iEEG data not available at {IEEG_ROOT}"
@@ -53,9 +53,9 @@ IEEG_SUBJECT = "R1001P"
 IEEG_SESSION = "0"
 IEEG_TASK = "FR1"
 
-EEG_SUBJECT = "LTP001"
+EEG_SUBJECT = "LTP606"
 EEG_SESSION = "0"
-EEG_TASK = "VisualCategorization"
+EEG_TASK = "valuecourier"
 
 
 @pytest.fixture
@@ -228,55 +228,73 @@ class TestIEEGIntegration:
         assert ieeg_reader.is_intracranial() is True
 
     def test_space_detected(self, ieeg_reader):
-        assert ieeg_reader.space is not None
-        assert isinstance(ieeg_reader.space, str)
+        assert ieeg_reader.space == "MNI152NLin6ASym"
 
     def test_load_events(self, ieeg_reader):
         df = ieeg_reader.load_events()
         assert isinstance(df, pd.DataFrame)
-        assert len(df) > 0
-        assert "onset" in df.columns or "sample" in df.columns
+        assert len(df) == 756
+        expected_cols = {
+            "onset", "sample", "trial_type", "duration", "subject", "session",
+            "experiment", "list", "serialpos", "item_name", "stim_file",
+            "answer", "test", "response_time",
+        }
+        assert expected_cols.issubset(df.columns)
 
     def test_load_electrodes(self, ieeg_reader):
         df = ieeg_reader.load_electrodes()
         assert isinstance(df, pd.DataFrame)
-        assert "name" in df.columns
-        assert len(df) > 0
+        assert len(df) == 88
+        for col in ("name", "x", "y", "z", "hemisphere", "type",
+                     "ind.region", "stein.region", "das.region"):
+            assert col in df.columns
 
     def test_load_channels_monopolar(self, ieeg_reader):
         df = ieeg_reader.load_channels("monopolar")
         assert isinstance(df, pd.DataFrame)
-        assert "name" in df.columns
-        assert len(df) > 0
+        assert len(df) == 88
+        for col in ("name", "type", "units", "sampling_frequency"):
+            assert col in df.columns
 
     def test_load_channels_bipolar(self, ieeg_reader):
         df = ieeg_reader.load_channels("bipolar")
         assert isinstance(df, pd.DataFrame)
-        assert "name" in df.columns
-        assert len(df) > 0
+        assert len(df) == 72
+        for col in ("name", "type", "units", "reference", "sampling_frequency"):
+            assert col in df.columns
 
     def test_load_combined_channels_monopolar(self, ieeg_reader):
         df = ieeg_reader.load_combined_channels("monopolar")
         assert isinstance(df, pd.DataFrame)
-        assert len(df) > 0
-        assert "name" in df.columns
+        assert len(df) == 88
+        for col in ("name", "x", "y", "z", "type", "units",
+                     "ind.region", "stein.region", "das.region"):
+            assert col in df.columns
 
     def test_load_combined_channels_bipolar(self, ieeg_reader):
         df = ieeg_reader.load_combined_channels("bipolar")
         assert isinstance(df, pd.DataFrame)
-        assert len(df) > 0
-        assert "ch1" in df.columns
-        assert "ch2" in df.columns
+        assert len(df) == 72
+        for col in ("ch1", "ch2", "name", "type", "units",
+                     "x_mid", "y_mid", "z_mid",
+                     "ind.region_ch1", "ind.region_ch2",
+                     "stein.region_ch1", "stein.region_ch2"):
+            assert col in df.columns
 
     def test_load_coordsystem_desc(self, ieeg_reader):
         desc = ieeg_reader.load_coordsystem_desc()
         assert isinstance(desc, dict)
-        assert len(desc) > 0
+        assert desc == {
+            "iEEGCoordinateSystem": desc["iEEGCoordinateSystem"],
+            "iEEGCoordinateUnits": desc["iEEGCoordinateUnits"],
+        }
+        assert set(desc.keys()) == {"iEEGCoordinateSystem", "iEEGCoordinateUnits"}
 
     def test_load_raw(self, ieeg_reader):
         raw = ieeg_reader.load_raw("monopolar")
         assert isinstance(raw, mne.io.BaseRaw)
-        assert len(raw.ch_names) > 0
+        assert len(raw.ch_names) == 88
+        assert raw.info["sfreq"] == 500.0
 
     def test_load_epochs(self, ieeg_reader):
         epochs = ieeg_reader.load_epochs(
@@ -286,13 +304,11 @@ class TestIEEGIntegration:
 
     def test_get_subject_sessions(self, ieeg_reader):
         sessions = ieeg_reader.get_subject_sessions()
-        assert isinstance(sessions, list)
-        assert IEEG_SESSION in sessions or str(IEEG_SESSION) in sessions
+        assert sessions == ["0", "1"]
 
     def test_get_subject_tasks(self, ieeg_reader):
         tasks = ieeg_reader.get_subject_tasks()
-        assert isinstance(tasks, list)
-        assert len(tasks) > 0
+        assert tasks == ["FR1"]
 
 
 @skip_no_eeg
@@ -306,29 +322,35 @@ class TestEEGIntegration:
         assert eeg_reader.is_intracranial() is False
 
     def test_space_detected(self, eeg_reader):
-        _ = eeg_reader.space
+        assert eeg_reader.space == "CapTrak"
 
     def test_load_events(self, eeg_reader):
         df = eeg_reader.load_events()
         assert isinstance(df, pd.DataFrame)
-        assert len(df) > 0
+        assert len(df) == 242
+        for col in ("trial_type", "subject", "session", "experiment",
+                     "recalled", "serialpos", "item", "stim_file"):
+            assert col in df.columns
 
     def test_load_electrodes(self, eeg_reader):
         df = eeg_reader.load_electrodes()
         assert isinstance(df, pd.DataFrame)
-        assert "name" in df.columns
-        assert len(df) > 0
+        assert len(df) == 136
+        for col in ("name", "x", "y", "z"):
+            assert col in df.columns
 
     def test_load_channels(self, eeg_reader):
         df = eeg_reader.load_channels()
         assert isinstance(df, pd.DataFrame)
-        assert "name" in df.columns
-        assert len(df) > 0
+        assert len(df) == 137
+        for col in ("name", "type", "units", "sampling_frequency", "status"):
+            assert col in df.columns
 
     def test_load_raw(self, eeg_reader):
         raw = eeg_reader.load_raw()
         assert isinstance(raw, mne.io.BaseRaw)
-        assert len(raw.ch_names) > 0
+        assert len(raw.ch_names) == 137
+        assert raw.info["sfreq"] == 2048.0
 
     def test_load_epochs(self, eeg_reader):
         epochs = eeg_reader.load_epochs(tmin=-0.5, tmax=1.0)
@@ -336,14 +358,12 @@ class TestEEGIntegration:
 
     def test_get_subject_sessions(self, eeg_reader):
         sessions = eeg_reader.get_subject_sessions()
-        assert isinstance(sessions, list)
+        assert sessions == ["0", "1", "2", "3", "4", "5"]
 
     def test_get_subject_tasks(self, eeg_reader):
         tasks = eeg_reader.get_subject_tasks()
-        assert isinstance(tasks, list)
-        assert len(tasks) > 0
+        assert tasks == ["valuecourier"]
 
     def test_get_dataset_subjects(self, eeg_reader):
         subjects = eeg_reader.get_dataset_subjects()
-        assert isinstance(subjects, list)
-        assert len(subjects) > 0
+        assert sorted(subjects) == ["LTP606", "LTP607"]
