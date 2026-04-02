@@ -101,6 +101,28 @@ class TestMergeDuplicateSampleEvents:
         merged_row = result[result["sample"] == 1].iloc[0]
         assert merged_row["trial_type"] == "WORD/STIM"
 
+    def test_duplicate_samples_empty_merge_trial_type(self):
+        df = pd.DataFrame({
+            "sample": [1, 1, 2],
+            "trial_type": ["", "STIM", "REST"],
+        })
+        result = merge_duplicate_sample_events(df)
+        assert len(result) == 2
+        merged_row = result[result["sample"] == 1].iloc[0]
+        assert merged_row["trial_type"] == "/STIM"
+
+    def test_duplicate_samples_merge_mutliple_trial_type(self):
+        df = pd.DataFrame({
+            "sample": [1, 1, 2, 2],
+            "trial_type": ["WORD", "STIM", "REST", "STIM"],
+        })
+        result = merge_duplicate_sample_events(df)
+        assert len(result) == 2
+        merged_row = result[result["sample"] == 1].iloc[0]
+        assert merged_row["trial_type"] == "WORD/STIM"
+        merged_row2 = result[result["sample"] == 2].iloc[0]
+        assert merged_row2["trial_type"] == "REST/STIM"
+
     def test_duplicate_trial_types_deduplicated(self):
         df = pd.DataFrame({
             "sample": [1, 1],

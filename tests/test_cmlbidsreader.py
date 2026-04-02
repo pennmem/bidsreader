@@ -2,15 +2,30 @@
 Tests for bidsreader.cmlbidsreader
 
 What is tested:
-  - __init__: default root is CML_ROOT
-  - _determine_device: LTP prefix -> eeg, R prefix -> ieeg, None -> None, unknown -> None
-  - _determine_space: directory not found, no coordsystem file, multiple files, valid single
-                      match, unparseable filename
-  - _validate_acq: scalp returns None, ieeg+None raises, ieeg+valid passes, ieeg+invalid raises
-  - _get_needed_fields: ieeg -> INTRACRANIAL_FIELDS, eeg -> SCALP_FIELDS
-  - is_intracranial: ieeg -> True, eeg -> False
+  Unit tests:
+    - __init__: default root is CML_ROOT
+    - _determine_device: LTP prefix -> eeg, R prefix -> ieeg, None -> None, unknown -> None
+    - _determine_space: directory not found, no coordsystem file, multiple files, valid single
+                        match, unparseable filename
+    - _validate_acq: scalp returns None, ieeg+None raises, ieeg+valid passes, ieeg+invalid raises
+    - _get_needed_fields: ieeg -> INTRACRANIAL_FIELDS, eeg -> SCALP_FIELDS
+    - is_intracranial: ieeg -> True, eeg -> False
+
+  Integration tests (skipped if data paths do not exist):
+    iEEG (FR1, root=/data/LTP_BIDS/FR1):
+      - Auto-detected device and space
+      - load_events, load_electrodes, load_channels, load_combined_channels
+      - load_coordsystem_desc, load_raw, load_epochs
+      - get_subject_sessions, get_subject_tasks
+    EEG (VCBehOnly, root=/data/LTP_BIDS/VCBehOnly):
+      - Auto-detected device and space
+      - load_events, load_electrodes, load_channels
+      - load_raw, load_epochs
+      - get_subject_sessions, get_subject_tasks, get_dataset_subjects
 """
 import pytest
+import pandas as pd
+import mne
 from pathlib import Path
 
 from bidsreader.cmlbidsreader import CMLBIDSReader, CML_ROOT
@@ -20,6 +35,41 @@ from bidsreader.exc import (
     AmbiguousMatchError,
     DataParseError,
 )
+
+# ---------------------------------------------------------------------------
+# Integration test paths and skip conditions
+# ---------------------------------------------------------------------------
+IEEG_ROOT = Path("/data/LTP_BIDS/FR1")
+EEG_ROOT = Path("/data/LTP_BIDS/VCBehOnly")
+
+skip_no_ieeg = pytest.mark.skipif(
+    not IEEG_ROOT.exists(), reason=f"iEEG data not available at {IEEG_ROOT}"
+)
+skip_no_eeg = pytest.mark.skipif(
+    not EEG_ROOT.exists(), reason=f"EEG data not available at {EEG_ROOT}"
+)
+
+IEEG_SUBJECT = "R1001P"
+IEEG_SESSION = "0"
+IEEG_TASK = "FR1"
+
+EEG_SUBJECT = "LTP001"
+EEG_SESSION = "0"
+EEG_TASK = "VisualCategorization"
+
+
+@pytest.fixture
+def ieeg_reader():
+    return CMLBIDSReader(
+        root=IEEG_ROOT, subject=IEEG_SUBJECT, task=IEEG_TASK, session=IEEG_SESSION,
+    )
+
+
+@pytest.fixture
+def eeg_reader():
+    return CMLBIDSReader(
+        root=EEG_ROOT, subject=EEG_SUBJECT, task=EEG_TASK, session=EEG_SESSION,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +85,15 @@ class TestCMLBIDSReaderInit:
     def test_custom_root(self, tmp_root):
         r = CMLBIDSReader(root=tmp_root, subject="LTP001", task="FR1", session="0")
         assert r.root == tmp_root
+
+    def test_invalid_device_raises(self, tmp_root):
+        with pytest.raises(InvalidOptionError):
+            CMLBIDSReader(root=tmp_root, device="magnetoencephalography")
+
+    def test_valid_devices(self, tmp_root):
+        for dev in ("eeg", "ieeg"):
+            r = CMLBIDSReader(root=tmp_root, device=dev)
+            assert r.device == dev
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +175,7 @@ class TestValidateAcq:
         assert cml_reader_eeg._validate_acq("bipolar") is None
 
     def test_ieeg_none_acquisition_raises(self, cml_reader_ieeg):
-        with pytest.raises(InvalidOptionError, match="acquisition was not set"):
+        with pytest.raises(InvalidOptionError, match="acquisition is set to None"):
             cml_reader_ieeg._validate_acq(None)
 
     def test_ieeg_valid_acquisition(self, cml_reader_ieeg):
@@ -152,3 +211,139 @@ class TestIsIntracranial:
 
     def test_eeg_is_not_intracranial(self, cml_reader_eeg):
         assert cml_reader_eeg.is_intracranial() is False
+
+
+# ===========================================================================
+# Integration tests — real data (skipped if paths don't exist)
+# ===========================================================================
+
+@skip_no_ieeg
+class TestIEEGIntegration:
+    """Integration tests against real iEEG (FR1) data."""
+
+    def test_auto_device(self, ieeg_reader):
+        assert ieeg_reader.device == "ieeg"
+
+    def test_is_intracranial(self, ieeg_reader):
+        assert ieeg_reader.is_intracranial() is True
+
+    def test_space_detected(self, ieeg_reader):
+        assert ieeg_reader.space is not None
+        assert isinstance(ieeg_reader.space, str)
+
+    def test_load_events(self, ieeg_reader):
+        df = ieeg_reader.load_events()
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) > 0
+        assert "onset" in df.columns or "sample" in df.columns
+
+    def test_load_electrodes(self, ieeg_reader):
+        df = ieeg_reader.load_electrodes()
+        assert isinstance(df, pd.DataFrame)
+        assert "name" in df.columns
+        assert len(df) > 0
+
+    def test_load_channels_monopolar(self, ieeg_reader):
+        df = ieeg_reader.load_channels("monopolar")
+        assert isinstance(df, pd.DataFrame)
+        assert "name" in df.columns
+        assert len(df) > 0
+
+    def test_load_channels_bipolar(self, ieeg_reader):
+        df = ieeg_reader.load_channels("bipolar")
+        assert isinstance(df, pd.DataFrame)
+        assert "name" in df.columns
+        assert len(df) > 0
+
+    def test_load_combined_channels_monopolar(self, ieeg_reader):
+        df = ieeg_reader.load_combined_channels("monopolar")
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) > 0
+        assert "name" in df.columns
+
+    def test_load_combined_channels_bipolar(self, ieeg_reader):
+        df = ieeg_reader.load_combined_channels("bipolar")
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) > 0
+        assert "ch1" in df.columns
+        assert "ch2" in df.columns
+
+    def test_load_coordsystem_desc(self, ieeg_reader):
+        desc = ieeg_reader.load_coordsystem_desc()
+        assert isinstance(desc, dict)
+        assert len(desc) > 0
+
+    def test_load_raw(self, ieeg_reader):
+        raw = ieeg_reader.load_raw("monopolar")
+        assert isinstance(raw, mne.io.BaseRaw)
+        assert len(raw.ch_names) > 0
+
+    def test_load_epochs(self, ieeg_reader):
+        epochs = ieeg_reader.load_epochs(
+            tmin=-0.5, tmax=1.0, acquisition="monopolar",
+        )
+        assert isinstance(epochs, mne.Epochs)
+
+    def test_get_subject_sessions(self, ieeg_reader):
+        sessions = ieeg_reader.get_subject_sessions()
+        assert isinstance(sessions, list)
+        assert IEEG_SESSION in sessions or str(IEEG_SESSION) in sessions
+
+    def test_get_subject_tasks(self, ieeg_reader):
+        tasks = ieeg_reader.get_subject_tasks()
+        assert isinstance(tasks, list)
+        assert len(tasks) > 0
+
+
+@skip_no_eeg
+class TestEEGIntegration:
+    """Integration tests against real EEG (VCBehOnly) data."""
+
+    def test_auto_device(self, eeg_reader):
+        assert eeg_reader.device == "eeg"
+
+    def test_is_not_intracranial(self, eeg_reader):
+        assert eeg_reader.is_intracranial() is False
+
+    def test_space_detected(self, eeg_reader):
+        _ = eeg_reader.space
+
+    def test_load_events(self, eeg_reader):
+        df = eeg_reader.load_events()
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) > 0
+
+    def test_load_electrodes(self, eeg_reader):
+        df = eeg_reader.load_electrodes()
+        assert isinstance(df, pd.DataFrame)
+        assert "name" in df.columns
+        assert len(df) > 0
+
+    def test_load_channels(self, eeg_reader):
+        df = eeg_reader.load_channels()
+        assert isinstance(df, pd.DataFrame)
+        assert "name" in df.columns
+        assert len(df) > 0
+
+    def test_load_raw(self, eeg_reader):
+        raw = eeg_reader.load_raw()
+        assert isinstance(raw, mne.io.BaseRaw)
+        assert len(raw.ch_names) > 0
+
+    def test_load_epochs(self, eeg_reader):
+        epochs = eeg_reader.load_epochs(tmin=-0.5, tmax=1.0)
+        assert isinstance(epochs, mne.Epochs)
+
+    def test_get_subject_sessions(self, eeg_reader):
+        sessions = eeg_reader.get_subject_sessions()
+        assert isinstance(sessions, list)
+
+    def test_get_subject_tasks(self, eeg_reader):
+        tasks = eeg_reader.get_subject_tasks()
+        assert isinstance(tasks, list)
+        assert len(tasks) > 0
+
+    def test_get_dataset_subjects(self, eeg_reader):
+        subjects = eeg_reader.get_dataset_subjects()
+        assert isinstance(subjects, list)
+        assert len(subjects) > 0

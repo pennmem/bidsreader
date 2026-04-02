@@ -33,26 +33,42 @@ class TestBaseReaderInit:
         with pytest.raises(ValueError, match="root must be provided"):
             BaseReader(root=None)
 
-    def test_valid_construction(self, tmp_root):
-        r = BaseReader(root=tmp_root, subject="01", task="rest", session="1", device="eeg")
+    def test_min_valid_construction(self, tmp_root):
+        r = BaseReader(root=tmp_root)
+        assert r.root == tmp_root
+
+    def test_sub_valid_construction(self, tmp_root):
+        r = BaseReader(root=tmp_root, subject="01", task="rest", session="1")
+        assert r.root == tmp_root
+        assert r.subject == "01"
+        assert r.task == "rest"
+        assert r.session == "1"
+
+    # should not prompt any errors
+    def test_device_acq_space_valid_construction(self, tmp_root):
+        r = BaseReader(root=tmp_root, subject="01", task="rest", session="1", device="eeg", acquisition="monopolar", space="Talarich")
         assert r.root == tmp_root
         assert r.subject == "01"
         assert r.task == "rest"
         assert r.session == "1"
         assert r.device == "eeg"
+        assert r.acquisition == "monopolar"
+        assert r.space == "Talarich"
+
+    def test_nonsense_construction(self, tmp_root): 
+        # there should be no checks
+        r = BaseReader(root=tmp_root, subject="a", task="ab", session="abc", device="abcd", acquisition="abcde", space="abcdef")
+        assert r.root == tmp_root
+        assert r.subject == "a"
+        assert r.task == "ab"
+        assert r.session == "abc"
+        assert r.device == "abcd"
+        assert r.acquisition == "abcde"
+        assert r.space == "abcdef"
 
     def test_root_converted_to_path(self, tmp_root):
         r = BaseReader(root=str(tmp_root), subject="01", task="rest", session="1")
         assert isinstance(r.root, Path)
-
-    def test_invalid_device_raises(self, tmp_root):
-        with pytest.raises(InvalidOptionError):
-            BaseReader(root=tmp_root, device="magnetoencephalography")
-
-    def test_valid_devices(self, tmp_root):
-        for dev in ("eeg", "ieeg"):
-            r = BaseReader(root=tmp_root, device=dev)
-            assert r.device == dev
 
     def test_device_none_allowed(self, tmp_root):
         r = BaseReader(root=tmp_root)
@@ -189,11 +205,11 @@ class TestRequire:
 # ---------------------------------------------------------------------------
 # _get_needed_fields
 # ---------------------------------------------------------------------------
-class TestGetNeededFields:
-    """Tests for BaseReader._get_needed_fields."""
+# class TestGetNeededFields:
+#     """Tests for BaseReader._get_needed_fields."""
 
-    def test_returns_required_fields(self, base_reader):
-        assert base_reader._get_needed_fields() == BaseReader.REQUIRED_FIELDS
+#     def test_returns_required_fields(self, base_reader):
+#         assert base_reader._get_needed_fields() == BaseReader.REQUIRED_FIELDS
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +236,7 @@ class TestSetFields:
 # ---------------------------------------------------------------------------
 class TestMetadataQueries:
     """Tests for get_subject_*, get_dataset_* methods using mocked get_entity_vals."""
-
+    # data is all mocked, we will use real data in test_integration
     @patch("bidsreader.basereader.get_entity_vals", return_value=["FR1", "catFR1"])
     def test_get_subject_tasks(self, mock_gev, base_reader):
         result = base_reader.get_subject_tasks()

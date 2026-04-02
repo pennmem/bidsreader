@@ -4,15 +4,13 @@ from pathlib import Path
 from typing import Iterable, Optional, Union, List
 import warnings
 from ._errorwrap import public_api
-from .helpers import validate_option, add_prefix
+from .helpers import add_prefix
 from .exc import InvalidOptionError, MissingRequiredFieldError
 
 
 class BaseReader:
-    _FIELDS = {"root", "subject", "session", "task", "acquisition", "device", "_space"}
-    VALID_DEVICES = ("eeg", "ieeg")
-    VALID_ACQ = ()
-    REQUIRED_FIELDS = ("subject", "task", "session", "device")
+    _FIELDS = {"root", "subject", "session", "task", "acquisition", "_device", "_space"}
+    # REQUIRED_FIELDS = ("subject", "task", "session", "device")
 
     def __init__(
         self,
@@ -33,9 +31,7 @@ class BaseReader:
 
         self.acquisition = acquisition
 
-        self._device = validate_option(
-            "device", device, self.VALID_DEVICES
-        )
+        self._device = device
 
         self._space = space
 
@@ -151,8 +147,9 @@ class BaseReader:
                 f"{context}: missing required fields: {', '.join(missing)}"
             )
 
-    def _get_needed_fields(self):
-        return self.REQUIRED_FIELDS
+    # idk if this is useful for anyone, should override for proper checking
+    # def _get_needed_fields(self):
+    #     return self.REQUIRED_FIELDS
 
     def _determine_space(self) -> Optional[str]:
         """Override in subclasses to provide automatic space detection."""
@@ -204,7 +201,7 @@ class BaseReader:
                     continue
 
                 if outlier_thresh is not None and si > outlier_thresh:
-                    warnings.warn("Session number is over 50. Double check dataset.")
+                    warnings.warn(f"Session number is over {outlier_thresh}. Double check dataset.")
                 else:
                     max_ses = si if max_ses is None else max(max_ses, si)
 

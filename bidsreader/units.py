@@ -9,25 +9,46 @@ if TYPE_CHECKING:
     from ptsa.data.timeseries import TimeSeries
 
 # ---------- unit constants ----------
+_EXP_TO_PREFIX = {
+    15: "P",   14: "e14_",  13: "e13_",  12: "T",   11: "e11_",  10: "e10_",
+    9: "G",    8: "e8_",    7: "e7_",    6: "M",    5: "e5_",    4: "e4_",
+    3: "k",    2: "h",      1: "da",
+    0: "",
+    -1: "d",   -2: "c",
+    -3: "m",   -4: "e-4_",  -5: "e-5_",  -6: "u",   -7: "e-7_",  -8: "e-8_",
+    -9: "n",   -10: "e-10_", -11: "e-11_", -12: "p", -13: "e-13_", -14: "e-14_",
+    -15: "f",
+}
+
 _UNIT_EXPONENTS = {
-    "V": 0, "mV": -3, "uV": -6, "nV": -9,
-    "T": 0, "mT": -3, "uT": -6, "nT": -9, "fT": -15,
+    # Volts
+    "PV": 15, "TV": 12, "GV": 9, "MV": 6, "kV": 3,
+    "hV": 2, "daV": 1,
+    "V": 0,
+    "dV": -1, "cV": -2,
+    "mV": -3, "uV": -6, "nV": -9, "pV": -12, "fV": -15,
+    # Tesla
+    "PT": 15, "TT": 12, "GT": 9, "MT": 6, "kT": 3,
+    "hT": 2, "daT": 1,
+    "T": 0,
+    "dT": -1, "cT": -2,
+    "mT": -3, "uT": -6, "nT": -9, "pT": -12, "fT": -15,
 }
 
 _FIFF_UNIT_TO_BASE = {107: "V", 201: "T", 0: None}
 
-_FIFF_MUL_TO_EXP = {
-    0: 0, -3: -3, -6: -6, -9: -9, -12: -12, -15: -15, 3: 3, 6: 6,
-}
-
-_EXP_TO_PREFIX = {
-    0: "", -3: "m", -6: "u", -9: "n", -12: "p", -15: "f", 3: "k", 6: "M",
-}
 
 # ---------- internal helpers ----------
 
 def _normalize_unit(unit: str) -> str:
-    return unit.replace("µ", "u")
+    return (
+        unit
+        .replace("\u00b5", "u")   # micro sign
+        .replace("\u03bc", "u")   # greek mu
+        .replace("\u03a9", "Ohm") # greek omega
+        .replace("\u2126", "Ohm") # ohm sign
+        .replace("\u00b0", "deg") # degree sign
+    )
 
 
 def _detect_unit_mne(inst: Union[mne.io.BaseRaw, mne.Epochs]) -> str:
@@ -35,7 +56,7 @@ def _detect_unit_mne(inst: Union[mne.io.BaseRaw, mne.Epochs]) -> str:
     eeg_types = {"eeg", "seeg", "ecog", "ieeg", "dbs"}
 
     for ch_info in inst.info["chs"]:
-        ch_kind = mne.io.pick.channel_type(
+        ch_kind = mne.channel_type(
             inst.info, inst.ch_names.index(ch_info["ch_name"]),
         )
         if ch_kind not in eeg_types:
@@ -51,7 +72,7 @@ def _detect_unit_mne(inst: Union[mne.io.BaseRaw, mne.Epochs]) -> str:
                 f"'{ch_info['ch_name']}'. Pass current_unit= explicitly."
             )
 
-        exp = _FIFF_MUL_TO_EXP.get(fiff_mul, 0)
+        exp = fiff_mul
         prefix = _EXP_TO_PREFIX.get(exp, "")
         return f"{prefix}{base}"
 
@@ -94,10 +115,7 @@ def _convert_mne(
     base_char = target_unit[-1]
     target_exp = _UNIT_EXPONENTS[target_unit]
     fiff_unit_code = {"V": 107, "T": 201}.get(base_char, 0)
-    fiff_mul = min(
-        _FIFF_MUL_TO_EXP.keys(),
-        key=lambda k: abs(_FIFF_MUL_TO_EXP[k] - target_exp),
-    )
+    fiff_mul = max(-15, min(15, target_exp))
 
     eeg_kinds = {2, 302, 802, 803}
     for ch in inst.info["chs"]:

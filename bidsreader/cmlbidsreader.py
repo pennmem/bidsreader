@@ -16,6 +16,7 @@ CML_ROOT = "/data/LTP_BIDS"
 
 class CMLBIDSReader(BaseReader):
     VALID_ACQ = ("bipolar", "monopolar")
+    VALID_DEVICES = ("eeg", "ieeg")
     INTRACRANIAL_FIELDS = ("subject", "task", "session", "device")
     SCALP_FIELDS = ("subject", "task", "session", "device")
 
@@ -29,6 +30,9 @@ class CMLBIDSReader(BaseReader):
         acquisition: Optional[str] = None,
         device: Optional[str] = None,
     ):
+        device = validate_option(
+            "device", device, self.VALID_DEVICES
+        )
         super().__init__(
             root=root,
             subject=subject,
@@ -89,7 +93,7 @@ class CMLBIDSReader(BaseReader):
         if not self.is_intracranial():
             return None
         if acquisition is None:
-            raise InvalidOptionError("acquisition was not set to bipolar, monopolar")
+            raise InvalidOptionError("acquisition is set to None")
         return validate_option("acquisition", acquisition, self.VALID_ACQ)
 
     def _get_needed_fields(self):
