@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import mne
 import numpy as np
-from typing import Optional, Union
-from ptsa.data.timeseries import TimeSeries
+from typing import Optional, Union, TYPE_CHECKING
 from ._errorwrap import public_api
+
+if TYPE_CHECKING:
+    from ptsa.data.timeseries import TimeSeries
 
 # ---------- unit constants ----------
 _UNIT_EXPONENTS = {
@@ -95,8 +99,7 @@ def _convert_mne(
         key=lambda k: abs(_FIFF_MUL_TO_EXP[k] - target_exp),
     )
 
-    # Update unit metadata on all EEG/SEEG/ECoG channels
-    eeg_kinds = {2, 302, 802, 803}  # EEG, EEG_REF, SEEG, ECOG
+    eeg_kinds = {2, 302, 802, 803}
     for ch in inst.info["chs"]:
         if ch.get("kind", 0) in eeg_kinds or ch.get("unit", 0) in (107, 201):
             ch["unit"] = fiff_unit_code
@@ -118,11 +121,19 @@ def _convert_ptsa(
         ts.values[:] *= factor
         result = ts
 
-    # Update all unit-related attrs so users know the current unit
     result.attrs["units"] = target_unit
     result.attrs["unit"] = target_unit
 
     return result
+
+
+def _is_timeseries(obj) -> bool:
+    """Check if obj is a PTSA TimeSeries without requiring PTSA at import time."""
+    try:
+        from ptsa.data.timeseries import TimeSeries
+        return isinstance(obj, TimeSeries)
+    except ImportError:
+        return False
 
 # ---------- public API ----------
 
@@ -163,7 +174,7 @@ def detect_unit(
     if isinstance(data, (mne.io.BaseRaw, mne.Epochs)):
         return _detect_unit_mne(data)
 
-    if isinstance(data, TimeSeries):
+    if _is_timeseries(data):
         return _detect_unit_ptsa(data)
 
     raise TypeError(
@@ -252,7 +263,7 @@ def convert_unit(
     if isinstance(data, (mne.io.BaseRaw, mne.Epochs)):
         return _convert_mne(data, factor, target_normalized, copy)
 
-    if isinstance(data, TimeSeries):
+    if _is_timeseries(data):
         return _convert_ptsa(data, factor, target_normalized, copy)
 
     raise TypeError(f"Cannot convert type {type(data).__name__}")
