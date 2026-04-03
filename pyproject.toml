@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bidsreader"
+version = "0.1.0"
+description = "Data loader and file reader for the OpenBIDS format"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Computational Memory Lab" },
+]
+keywords = ["bids", "eeg", "ieeg", "neuroscience", "mne"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "mne>=1.0",
+    "mne-bids>=0.14",
+    "numpy>=1.23",
+    "pandas>=1.5",
+]
+
+[project.optional-dependencies]
+ptsa = ["ptsa"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+]
+all = ["bidsreader[ptsa,dev]"]
+
+[project.urls]
+Homepage = "https://github.com/pennmem/bidsreader"
+Repository = "https://github.com/pennmem/bidsreader"
+Issues = "https://github.com/pennmem/bidsreader/issues"
+
+[tool.setuptools.packages.find]
+include = ["bidsreader*"]
+exclude = ["tests*", "tutorials*", "cmlbidsreader_tutorials*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
