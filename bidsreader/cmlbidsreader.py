@@ -183,7 +183,7 @@ class CMLBIDSReader(BaseReader):
             return json.load(f)
 
     @public_api
-    def load_raw(self, acquisition: Optional[str] = None) -> mne.io.BaseRaw:
+    def load_raw(self, acquisition: Optional[str] = None, extension: Optional[str] = None) -> mne.io.BaseRaw:
         self._require(self._get_needed_fields(), context="load_raw")
 
         acq = self._validate_acq(acquisition)
@@ -192,6 +192,15 @@ class CMLBIDSReader(BaseReader):
         if acq is not None:
             bp_kwargs["acquisition"] = acq
         bp = self._bp(**bp_kwargs)
+
+        if extension is None:
+            for ext in (".bdf", ".edf", ".vhdr", ".set", ".nwb", ".fif"):
+                candidate = bp.copy().update(suffix=self.device, extension=ext).fpath
+                if candidate.exists():
+                    bp = bp.copy().update(suffix=self.device, extension=ext)
+                    break
+        else :
+            bp = bp.copy().update(suffix=self.device, extension=extension)
 
         with warnings.catch_warnings():
             warnings.filterwarnings(
@@ -222,9 +231,10 @@ class CMLBIDSReader(BaseReader):
         event_repeated: str = "merge",
         channels: Optional[Iterable[str]] = None,
         preload: bool = False,
+        extension: Optional[str] = None
     ) -> mne.Epochs:
         self._require(self._get_needed_fields(), context="load_epochs")
-        raw = self.load_raw(acquisition=acquisition)
+        raw = self.load_raw(acquisition=acquisition, extension=extension)
 
         all_events_raw, all_event_id = mne.events_from_annotations(raw)
 
