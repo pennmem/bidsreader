@@ -277,3 +277,69 @@ class CMLBIDSReader(BaseReader):
             event_repeated=event_repeated,
             picks=picks,
         )
+
+    # ---------- data index ----------
+    def get_data_index(self, root: Union[str, Path] = None, task: str = None) -> pd.DataFrame:
+        """Scan a BIDS root and return a session-level DataFrame with
+        file-path columns for each major BIDS output.
+
+        Parameters default to ``self.root`` and ``self.task`` when called
+        on an instance, but can be overridden with explicit values.
+
+        Extends ``BaseReader.get_data_index`` (subject / task / session)
+        with columns whose values are the file path if the file exists,
+        or ``None`` if it doesn't:
+
+        - ``beh`` — behavioral events TSV
+        - ``eeg`` — scalp EEG recording (edf/bdf/set/vhdr)
+        - ``mono_ieeg`` — monopolar iEEG recording (edf/bdf)
+        - ``bi_ieeg`` — bipolar iEEG recording (edf/bdf)
+        - ``mono_channels`` — monopolar channels TSV
+        - ``bi_channels`` — bipolar channels TSV
+        - ``eeg_events`` / ``ieeg_events`` — device-level events TSV
+        - ``electrodes`` — electrodes TSV
+        - ``coordsystem`` — coordinate system JSON
+        """
+        root = root if root is not None else self.root
+        task = task if task is not None else self.task
+        df = super().get_data_index(root, task)
+        if df.empty:
+            return df
+
+        root = Path(root)
+        # File patterns to search for. Each entry is (column_name, subdir,
+        # glob_pattern). Patterns use {pfx} for the BIDS filename prefix.
+        _PATTERNS = [
+            ("beh",            "beh",  "{pfx}_beh.tsv"),
+            ("eeg",            "eeg",  "{pfx}_eeg.*"),
+            ("mono_ieeg",      "ieeg", "{pfx}_acq-monopolar_ieeg.*"),
+            ("bi_ieeg",        "ieeg", "{pfx}_acq-bipolar_ieeg.*"),
+            ("mono_channels",  "ieeg", "{pfx}_acq-monopolar_channels.tsv"),
+            ("bi_channels",    "ieeg", "{pfx}_acq-bipolar_channels.tsv"),
+            ("eeg_channels",   "eeg",  "{pfx}_channels.tsv"),
+            ("ieeg_events",    "ieeg", "{pfx}_events.tsv"),
+            ("eeg_events",     "eeg",  "{pfx}_events.tsv"),
+            ("electrodes",     "ieeg", "{pfx}_*electrodes.tsv"),
+            ("coordsystem",    "ieeg", "{pfx}_*coordsystem.json"),
+        ]
+        # Data-file extensions to accept (skip sidecars).
+        _DATA_EXTS = {".edf", ".bdf", ".set", ".vhdr", ".fif", ".nwb", ".mff"}
+
+        new_cols = {col: [None] * len(df) for col, _, _ in _PATTERNS}
+        for idx, row in df.iterrows():
+            sub, ses = row["subject"], row["session"]
+            pfx = f"sub-{sub}_ses-{ses}_task-{task}"
+            sess_dir = root / f"sub-{sub}" / f"ses-{ses}"
+
+            for col, subdir, pat in _PATTERNS:
+                glob_pat = pat.format(pfx=pfx)
+                matches = list((sess_dir / subdir).glob(glob_pat))
+                # For recording files (eeg/ieeg), keep only data files.
+                if col in ("eeg", "mono_ieeg", "bi_ieeg"):
+                    matches = [m for m in matches if m.suffix in _DATA_EXTS]
+                if matches:
+                    new_cols[col][idx] = str(matches[0])
+
+        for col, _, _ in _PATTERNS:
+            df[col] = new_cols[col]
+        return df

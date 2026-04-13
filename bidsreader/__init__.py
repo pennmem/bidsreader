@@ -8,7 +8,6 @@ from .filtering import (
 )
 from .convert import mne_epochs_to_ptsa, mne_raw_to_ptsa
 from .units import detect_unit, get_scale_factor, convert_unit
-from .public_helpers import get_data_index
 from collections import namedtuple
 
 __version__ = "0.2.1"

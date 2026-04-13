@@ -1,3 +1,5 @@
+import re
+
 import pandas as pd
 from mne_bids import BIDSPath, get_entity_vals
 from pathlib import Path
@@ -206,3 +208,48 @@ class BaseReader:
                     max_ses = si if max_ses is None else max(max_ses, si)
 
         return max_ses
+
+    # ---------- data index ----------
+    def get_data_index(self, root: Union[str, Path] = None, task: str = None) -> pd.DataFrame:
+        """Scan a BIDS root for sessions matching *task* and return a
+        DataFrame with ``subject``, ``task``, ``session`` columns.
+
+        Parameters default to ``self.root`` and ``self.task`` when called
+        on an instance, but can be overridden with explicit values::
+
+            # instance — uses reader's own root / task
+            reader = BaseReader(root="/data/BIDS", task="FR1")
+            df = reader.get_data_index()
+
+            # explicit — useful without a fully configured reader
+            df = reader.get_data_index(root="/other/root", task="catFR1")
+
+        Subclasses can override to add file-path columns for each
+        expected BIDS output (see ``CMLBIDSReader.get_data_index``).
+        """
+        root = Path(root) if root is not None else self.root
+        task = task if task is not None else self.task
+        if root is None:
+            raise ValueError("root must be provided either on the instance or as an argument")
+        if task is None:
+            raise ValueError("task must be provided either on the instance or as an argument")
+
+        pat = re.compile(
+            r"sub-(?P<sub>[^_]+)_ses-(?P<ses>[^_]+)_task-" + re.escape(task),
+            re.IGNORECASE,
+        )
+        rows = []
+        for f in root.rglob(f"*task-{task}*beh.tsv"):
+            m = pat.search(f.name)
+            if m:
+                rows.append({
+                    "subject": m.group("sub"),
+                    "task": task,
+                    "session": m.group("ses"),
+                })
+        return (
+            pd.DataFrame(rows)
+            .drop_duplicates()
+            .sort_values(["subject", "session"])
+            .reset_index(drop=True)
+        )
