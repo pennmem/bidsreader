@@ -24,8 +24,8 @@ classifiers = [
 ]
 dependencies = [
     "mne>=1.0",
-    "mne-bids>=0.14",
-    "numpy>=1.23",
+    "mne-bids>=0.12",
+    "numpy>=1.23,<2.0",
     "pandas>=1.5",
 ]
 

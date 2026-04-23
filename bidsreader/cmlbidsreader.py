@@ -54,14 +54,32 @@ class CMLBIDSReader(BaseReader):
             return "ieeg"
         return None
 
-    def _determine_space(self) -> str:
+    DEFAULT_SPACE = "MNI152NLin6ASym"
+    SPACE_PREFERENCE = ("MNI152NLin6ASym", "Talairach" ,"fsaverage", "Pixels", "fsaverageBrainshift" "fsnative", "fsnativeBrainshift", "fsnativeDural", "t1MRI")
+
+    def _coordsystem_dir(self) -> Path:
         subject_root = self._subject_root()
-        data_dir = subject_root / self._add_bids_prefix("session", self.session) / self.device
+        return subject_root / self._add_bids_prefix("session", self.session) / self.device
+
+    def list_available_spaces(self) -> list:
+        """Return the sorted list of BIDS space names present as
+        *_coordsystem.json files for this session."""
+        data_dir = self._coordsystem_dir()
+        if not data_dir.exists():
+            return []
+        spaces = []
+        for m in data_dir.glob("*_coordsystem.json"):
+            space = space_from_coordsystem_fname(m.name)
+            if space is not None:
+                spaces.append(space)
+        return sorted(set(spaces))
+
+    def _determine_space(self) -> str:
+        data_dir = self._coordsystem_dir()
 
         if not data_dir.exists():
             raise FileNotFoundBIDSError(
                 f"determine_space: data directory does not exist.\n"
-                f"subject_root={subject_root}\n"
                 f"data_dir={data_dir}"
             )
 
@@ -72,22 +90,30 @@ class CMLBIDSReader(BaseReader):
                 f"data_dir={data_dir}"
             )
 
-        if len(matches) > 1:
-            raise AmbiguousMatchError(
-                f"determine_space: multiple coordsystem files found.\n"
-                f"files={[m.name for m in matches]}"
-            )
+        spaces = []
+        for m in matches:
+            space = space_from_coordsystem_fname(m.name)
+            if space is None:
+                raise DataParseError(
+                    f"determine_space: could not parse space from filename.\n"
+                    f"filename={m.name}"
+                )
+            spaces.append(space)
+        spaces = sorted(set(spaces))
 
-        fname = matches[0].name
-        space = space_from_coordsystem_fname(fname)
+        if len(spaces) == 1:
+            return spaces[0]
 
-        if space is None:
-            raise DataParseError(
-                f"determine_space: could not parse space from filename.\n"
-                f"filename={fname}"
-            )
+        for preferred in self.SPACE_PREFERENCE:
+            if preferred in spaces:
+                return preferred
 
-        return space
+        raise AmbiguousMatchError(
+            f"determine_space: multiple spaces found and none of the "
+            f"preferred defaults {self.SPACE_PREFERENCE} present. "
+            f"Available spaces: {spaces}. "
+            f"Pass space=<one of these> when constructing CMLBIDSReader."
+        )
 
     def _validate_acq(self, acquisition: Optional[str]) -> Optional[str]:
         if not self.is_intracranial():
@@ -99,9 +125,9 @@ class CMLBIDSReader(BaseReader):
     def _get_needed_fields(self):
         return self.INTRACRANIAL_FIELDS if self.is_intracranial() else self.SCALP_FIELDS
 
-    def _attach_bipolar_midpoint_montage(self, raw: mne.io.BaseRaw) -> None:
+    def _attach_bipolar_midpoint_montage(self, raw: mne.io.BaseRaw, space: Optional[str] = None) -> None:
         pairs_df = self.load_channels("bipolar")
-        elec_df = self.load_electrodes()
+        elec_df = self.load_electrodes(space=space)
         combo = combine_bipolar_electrodes(pairs_df, elec_df)
 
         if not {"name", "x_mid", "y_mid", "z_mid"}.issubset(combo.columns):
@@ -145,13 +171,25 @@ class CMLBIDSReader(BaseReader):
 
         return pd.read_csv(matches[0].fpath, sep="\t")
 
-    @public_api
-    def load_electrodes(self) -> pd.DataFrame:
-        self._require(self._get_needed_fields(), context="load_electrodes")
+    def _space_file(self, space: str, suffix: str, extension: str) -> Path:
+        """Build a space-<label>_<suffix>.<ext> path manually, bypassing
+        mne_bids.BIDSPath validation (which rejects non-standard space
+        labels like 'fsnative', 'fsnativeDural', 'fsaverageBrainshift')."""
+        data_dir = self._coordsystem_dir()
+        task_part = f"_task-{self.task}" if self.is_intracranial() and self.task else ""
+        fname = (
+            f"sub-{self.subject}_"
+            f"ses-{self.session}"
+            f"{task_part}"
+            f"_space-{space}_{suffix}{extension}"
+        )
+        return data_dir / fname
 
-        _task = self.task if self.is_intracranial() else None
-        bp = self._bp(datatype=self.device, suffix="electrodes", space=self.space, task=_task, extension=".tsv")
-        return pd.read_csv(bp.fpath, sep="\t")
+    @public_api
+    def load_electrodes(self, space: Optional[str] = None) -> pd.DataFrame:
+        self._require(self._get_needed_fields(), context="load_electrodes")
+        _space = space if space is not None else self.space
+        return pd.read_csv(self._space_file(_space, "electrodes", ".tsv"), sep="\t")
 
     @public_api
     def load_channels(self, acquisition: Optional[str] = None) -> pd.DataFrame:
@@ -162,24 +200,21 @@ class CMLBIDSReader(BaseReader):
         return pd.read_csv(bp.fpath, sep="\t")
 
     @public_api
-    def load_combined_channels(self, acquisition: Optional[str] = None) -> pd.DataFrame:
+    def load_combined_channels(self, acquisition: Optional[str] = None, space: Optional[str] = None) -> pd.DataFrame:
         self._require(self._get_needed_fields(), context="load_combined_channels")
 
         channel_df = self.load_channels(acquisition)
-        elec_df = self.load_electrodes()
+        elec_df = self.load_electrodes(space=space)
         if acquisition == "monopolar" or acquisition is None:
             return channel_df.merge(elec_df, on="name", how="left", suffixes=("", "_elec"))
         if acquisition == "bipolar":
             return combine_bipolar_electrodes(channel_df, elec_df)
 
     @public_api
-    def load_coordsystem_desc(self) -> Dict:
+    def load_coordsystem_desc(self, space: Optional[str] = None) -> Dict:
         self._require(self._get_needed_fields(), context="load_coordsystem")
-
-        _task = self.task if self.is_intracranial() else None
-        bp = self._bp(datatype=self.device, suffix="coordsystem", space=self.space, task=_task, extension=".json")
-
-        with open(bp.fpath, "r") as f:
+        _space = space if space is not None else self.space
+        with open(self._space_file(_space, "coordsystem", ".json"), "r") as f:
             return json.load(f)
 
     @public_api
@@ -211,6 +246,16 @@ class CMLBIDSReader(BaseReader):
             warnings.filterwarnings(
                 "ignore",
                 message=r".*is not an MNE-Python coordinate frame.*",
+                category=RuntimeWarning,
+            )
+            warnings.filterwarnings(
+                "ignore",
+                message=r"Expected to find a single (electrodes\.tsv|coordsystem\.json) file.*",
+                category=RuntimeWarning,
+            )
+            warnings.filterwarnings(
+                "ignore",
+                message=r"participants\.tsv file not found.*",
                 category=RuntimeWarning,
             )
             raw = read_raw_bids(bp)
