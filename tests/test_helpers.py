@@ -7,7 +7,7 @@ What is tested:
   - add_prefix: None input, already-prefixed value, value needing prefix
   - merge_duplicate_sample_events: no duplicates, duplicate trial_type merge, all-NaN
   - find_coord_triplets: bare xyz, prefixed xyz, mixed columns, no triplets
-  - combine_bipolar_electrodes: pair splitting, midpoint computation, region agreement
+  - combine_bipolar_electrodes: pair splitting, midpoint computation, no synthetic pair region
   - normalize_trial_types: converts iterable of strings to set
   - match_event_label: exact match, slash-separated label, no match
 """
@@ -197,7 +197,12 @@ class TestCombineBipolarElectrodes:
         assert result.iloc[0]["y_mid"] == pytest.approx(5.5)
         assert result.iloc[0]["z_mid"] == pytest.approx(9.5)
 
-    def test_region_agreement(self):
+    def test_no_synthetic_pair_region_column(self):
+        """Neurorad assigns pair-region labels via atlas lookup at the
+        midpoint voxel, not by contact-level agreement. The combiner
+        must therefore NOT synthesize a ``{col}_pair`` column. Per-contact
+        region columns are still present as ``{col}_ch1`` / ``{col}_ch2``.
+        """
         pairs = pd.DataFrame({"name": ["A1-A2"]})
         elecs = pd.DataFrame({
             "name": ["A1", "A2"],
@@ -205,17 +210,9 @@ class TestCombineBipolarElectrodes:
             "wb.region": ["hippocampus", "hippocampus"],
         })
         result = combine_bipolar_electrodes(pairs, elecs)
-        assert result.iloc[0]["wb.region_pair"] == "hippocampus"
-
-    def test_region_disagreement(self):
-        pairs = pd.DataFrame({"name": ["A1-A2"]})
-        elecs = pd.DataFrame({
-            "name": ["A1", "A2"],
-            "x": [1.0, 2.0], "y": [3.0, 4.0], "z": [5.0, 6.0],
-            "wb.region": ["hippocampus", "amygdala"],
-        })
-        result = combine_bipolar_electrodes(pairs, elecs)
-        assert pd.isna(result.iloc[0]["wb.region_pair"])
+        assert "wb.region_pair" not in result.columns
+        assert result.iloc[0]["wb.region_ch1"] == "hippocampus"
+        assert result.iloc[0]["wb.region_ch2"] == "hippocampus"
 
 
 # ---------------------------------------------------------------------------

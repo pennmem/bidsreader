@@ -1,8 +1,28 @@
+"""Utility helpers for bidsreader.
+
+Pair-coordinate math (``combine_bipolar_electrodes``) uses
+``pair_coordinate_axis`` from :mod:`._neurorad_algo`, which is a
+verbatim copy of the CML neurorad pipeline's
+``Localization.get_pair_coordinate``. The rule is the same in every
+BIDS coordinate space we support — ``MNI152NLin6ASym``, ``Talairach``,
+``fsaverage``, ``fsaverageBrainshift``, ``fsnative``,
+``fsnativeBrainshift``, ``fsnativeDural``, ``t1MRI``, ``Pixels`` —
+because those per-space contact coordinates have already been
+produced by the pipeline's space-specific transforms before BIDS
+export.
+
+For the BIDS space ↔ CML ``coordinate_space`` / ``coordinate_type``
+mapping see ``eeg_validation.preparers.montage.CML_TO_BIDS_SPACE`` or
+:attr:`bidsreader._neurorad_algo.BIDS_SPACE_TO_NEURORAD`.
+"""
+
 import numpy as np
 import pandas as pd
+from math import floor
 from typing import Iterable, Any, Tuple, Sequence, Optional, Dict
 import re
 from .exc import InvalidOptionError
+from ._neurorad_algo import pair_coordinate_axis
 
 def validate_option(name: str, value: Any, allowed: Iterable[Any]) -> Any:
     if value is None:
@@ -95,7 +115,23 @@ def combine_bipolar_electrodes(
         pair_col: str = "name",
         elec_name_col: str = "name",
         region_cols: Sequence[str] = ("wb.region", "ind.region", "stein.region"),
+        space: Optional[str] = None,
     ) -> pd.DataFrame:
+    """Join bipolar pairs with electrode metadata and compute per-pair
+    coordinate midpoints, matching the neurorad pipeline's pair-location
+    algorithm (``Localization.get_pair_coordinate`` — see
+    :mod:`bidsreader._neurorad_algo`). Midpoint is taken in whatever BIDS
+    space ``elec_df`` carries; upstream brainshift / nonlinear-warp
+    corrections are expected to have already been applied per-contact.
+
+    Region columns from ``region_cols`` are carried through per-contact
+    (as ``{col}_ch1`` / ``{col}_ch2``) but no ``{col}_pair`` column is
+    synthesized. Neurorad assigns pair-region labels by independently
+    looking up the atlas at each pair's midpoint voxel, which cannot be
+    reproduced from contact-level agreement. Callers that need
+    pair-region labels should pull them from the upstream
+    ``pairs.json`` via ``enrich_pairs_with_cml_regions``.
+    """
     sep = "-"
     out = pairs_df.copy()
 
@@ -122,20 +158,18 @@ def combine_bipolar_electrodes(
     look2 = look.add_suffix("_ch2").rename(columns={f"{elec_name_col}_ch2": "ch2"})
     out = out.merge(look2, on="ch2", how="left")
 
-    # Region agreement
-    for rc in region_cols:
-        if f"{rc}_ch1" in out.columns and f"{rc}_ch2" in out.columns:
-            a = out[f"{rc}_ch1"]
-            b = out[f"{rc}_ch2"]
-            out[f"{rc}_pair"] = np.where(a.notna() & (a == b), a, np.nan)
-
-    # Midpoints for every detected coordinate triplet
+    # Midpoints for every detected coordinate triplet. pair_coordinate_axis
+    # is a verbatim copy of neurorad_pipeline.localization.Localization
+    # .get_pair_coordinate reduced to a single axis.
     for prefix, (xcol, ycol, zcol) in coord_triplets.items():
         for col in (xcol, ycol, zcol):
             a = out[f"{col}_ch1"]
             b = out[f"{col}_ch2"]
             mid_name = f"{col}_mid"  # e.g., "x_mid" or "tal.x_mid"
-            out[mid_name] = np.where(a.notna() & b.notna(), (a + b) / 2.0, np.nan)
+            mid = pair_coordinate_axis(a, b)
+            if space == "Pixels":
+                mid = floor(mid)
+            out[mid_name] = np.where(a.notna() & b.notna(), mid, np.nan)
 
     return out
 

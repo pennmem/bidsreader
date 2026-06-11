@@ -55,7 +55,7 @@ class CMLBIDSReader(BaseReader):
         return None
 
     DEFAULT_SPACE = "MNI152NLin6ASym"
-    SPACE_PREFERENCE = ("MNI152NLin6ASym", "Talairach" ,"fsaverage", "Pixels", "fsaverageBrainshift" "fsnative", "fsnativeBrainshift", "fsnativeDural", "t1MRI")
+    SPACE_PREFERENCE = ("MNI152NLin6ASym", "Talairach", "fsaverage", "Pixels", "fsaverageBrainshift", "fsnative", "fsnativeBrainshift", "fsnativeDural", "t1MRI")
 
     def _coordsystem_dir(self) -> Path:
         subject_root = self._subject_root()
@@ -128,7 +128,7 @@ class CMLBIDSReader(BaseReader):
     def _attach_bipolar_midpoint_montage(self, raw: mne.io.BaseRaw, space: Optional[str] = None) -> None:
         pairs_df = self.load_channels("bipolar")
         elec_df = self.load_electrodes(space=space)
-        combo = combine_bipolar_electrodes(pairs_df, elec_df)
+        combo = combine_bipolar_electrodes(pairs_df, elec_df, space=self.space)
 
         if not {"name", "x_mid", "y_mid", "z_mid"}.issubset(combo.columns):
             return
@@ -208,7 +208,7 @@ class CMLBIDSReader(BaseReader):
         if acquisition == "monopolar" or acquisition is None:
             return channel_df.merge(elec_df, on="name", how="left", suffixes=("", "_elec"))
         if acquisition == "bipolar":
-            return combine_bipolar_electrodes(channel_df, elec_df)
+            return combine_bipolar_electrodes(channel_df, elec_df, space=self.space)
 
     @public_api
     def load_coordsystem_desc(self, space: Optional[str] = None) -> Dict:
