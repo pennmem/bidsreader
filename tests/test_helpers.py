@@ -7,7 +7,7 @@ What is tested:
   - add_prefix: None input, already-prefixed value, value needing prefix
   - merge_duplicate_sample_events: no duplicates, duplicate trial_type merge, all-NaN
   - find_coord_triplets: bare xyz, prefixed xyz, mixed columns, no triplets
-  - combine_bipolar_electrodes: pair splitting, midpoint computation, region agreement
+  - combine_bipolar_electrodes: pair splitting, midpoint computation, no synthetic pair region
   - normalize_trial_types: converts iterable of strings to set
   - match_event_label: exact match, slash-separated label, no match
 """
@@ -197,7 +197,12 @@ class TestCombineBipolarElectrodes:
         assert result.iloc[0]["y_mid"] == pytest.approx(5.5)
         assert result.iloc[0]["z_mid"] == pytest.approx(9.5)
 
-    def test_region_agreement(self):
+    def test_no_synthetic_pair_region_column(self):
+        """Neurorad assigns pair-region labels via atlas lookup at the
+        midpoint voxel, not by contact-level agreement. The combiner
+        must therefore NOT synthesize a ``{col}_pair`` column. Per-contact
+        region columns are still present as ``{col}_ch1`` / ``{col}_ch2``.
+        """
         pairs = pd.DataFrame({"name": ["A1-A2"]})
         elecs = pd.DataFrame({
             "name": ["A1", "A2"],
@@ -205,17 +210,74 @@ class TestCombineBipolarElectrodes:
             "wb.region": ["hippocampus", "hippocampus"],
         })
         result = combine_bipolar_electrodes(pairs, elecs)
-        assert result.iloc[0]["wb.region_pair"] == "hippocampus"
+        assert "wb.region_pair" not in result.columns
+        assert result.iloc[0]["wb.region_ch1"] == "hippocampus"
+        assert result.iloc[0]["wb.region_ch2"] == "hippocampus"
 
-    def test_region_disagreement(self):
+    def test_pixels_space_floors_midpoint(self):
+        """In Pixels (CT voxel) space the midpoint is floored to an integer
+        voxel index, matching the neurorad pipeline's voxel handling."""
         pairs = pd.DataFrame({"name": ["A1-A2"]})
         elecs = pd.DataFrame({
             "name": ["A1", "A2"],
-            "x": [1.0, 2.0], "y": [3.0, 4.0], "z": [5.0, 6.0],
-            "wb.region": ["hippocampus", "amygdala"],
+            "x": [1.0, 2.0], "y": [5.0, 8.0], "z": [9.0, 10.0],
+        })
+        # raw midpoint = (1.5, 6.5, 9.5) -> floored = (1.0, 6.0, 9.0)
+        result = combine_bipolar_electrodes(pairs, elecs, space="Pixels")
+        assert result.iloc[0]["x_mid"] == pytest.approx(1.0)
+        assert result.iloc[0]["y_mid"] == pytest.approx(6.0)
+        assert result.iloc[0]["z_mid"] == pytest.approx(9.0)
+
+    def test_pixels_space_floors_multiple_pairs(self):
+        """Regression: flooring must work across many pairs at once. A scalar
+        math.floor here raised 'only length-1 arrays can be converted to
+        Python scalars' for any subject with >1 bipolar pair."""
+        pairs = pd.DataFrame({"name": ["A1-A2", "B1-B2"]})
+        elecs = pd.DataFrame({
+            "name": ["A1", "A2", "B1", "B2"],
+            "x": [1.2, 2.9, 3.1, 4.4],
+            "y": [5.0, 6.0, 7.0, 8.0],
+            "z": [9.0, 10.0, 11.0, 12.0],
+        })
+        result = combine_bipolar_electrodes(pairs, elecs, space="Pixels")
+        # A1-A2 raw mid x = 2.05 -> 2.0 ; B1-B2 raw mid x = 3.75 -> 3.0
+        assert list(result["x_mid"]) == pytest.approx([2.0, 3.0])
+
+    def test_non_pixels_space_does_not_floor(self):
+        """Default / non-Pixels spaces keep the fractional midpoint."""
+        pairs = pd.DataFrame({"name": ["A1-A2"]})
+        elecs = pd.DataFrame({
+            "name": ["A1", "A2"],
+            "x": [1.0, 2.0], "y": [5.0, 8.0], "z": [9.0, 10.0],
+        })
+        result = combine_bipolar_electrodes(pairs, elecs, space="MNI152NLin6ASym")
+        assert result.iloc[0]["x_mid"] == pytest.approx(1.5)
+        assert result.iloc[0]["y_mid"] == pytest.approx(6.5)
+
+    def test_missing_contact_coords_yield_nan_midpoint(self):
+        """If a pair references a contact missing from elec_df, its midpoint
+        columns are NaN rather than raising."""
+        pairs = pd.DataFrame({"name": ["A1-A2", "A1-GHOST"]})
+        elecs = pd.DataFrame({
+            "name": ["A1", "A2"],
+            "x": [1.0, 3.0], "y": [5.0, 7.0], "z": [9.0, 11.0],
         })
         result = combine_bipolar_electrodes(pairs, elecs)
-        assert pd.isna(result.iloc[0]["wb.region_pair"])
+        assert result.iloc[0]["x_mid"] == pytest.approx(2.0)
+        assert pd.isna(result.iloc[1]["x_mid"])
+
+    def test_prefixed_coord_triplet_midpoint(self):
+        """Prefixed coordinate triplets (e.g. tal.x/tal.y/tal.z) also get a
+        {prefix}.{axis}_mid column."""
+        pairs = pd.DataFrame({"name": ["A1-A2"]})
+        elecs = pd.DataFrame({
+            "name": ["A1", "A2"],
+            "tal.x": [0.0, 4.0], "tal.y": [0.0, 2.0], "tal.z": [0.0, 6.0],
+        })
+        result = combine_bipolar_electrodes(pairs, elecs)
+        assert result.iloc[0]["tal.x_mid"] == pytest.approx(2.0)
+        assert result.iloc[0]["tal.y_mid"] == pytest.approx(1.0)
+        assert result.iloc[0]["tal.z_mid"] == pytest.approx(3.0)
 
 
 # ---------------------------------------------------------------------------

@@ -55,7 +55,7 @@ class CMLBIDSReader(BaseReader):
         return None
 
     DEFAULT_SPACE = "MNI152NLin6ASym"
-    SPACE_PREFERENCE = ("MNI152NLin6ASym", "Talairach" ,"fsaverage", "Pixels", "fsaverageBrainshift" "fsnative", "fsnativeBrainshift", "fsnativeDural", "t1MRI")
+    SPACE_PREFERENCE = ("MNI152NLin6ASym", "Talairach", "fsaverage", "Pixels", "fsaverageBrainshift", "fsnative", "fsnativeBrainshift", "fsnativeDural", "t1MRI")
 
     def _coordsystem_dir(self) -> Path:
         subject_root = self._subject_root()
@@ -104,16 +104,24 @@ class CMLBIDSReader(BaseReader):
         if len(spaces) == 1:
             return spaces[0]
 
+        # Multiple spaces present: pick the highest-priority preferred space
+        # that is available.
         for preferred in self.SPACE_PREFERENCE:
             if preferred in spaces:
                 return preferred
 
-        raise AmbiguousMatchError(
+        # None of the preferred defaults is present. Rather than make the
+        # caller pass space= explicitly, fall back to a default: DEFAULT_SPACE
+        # if it happens to be available, otherwise the first space (sorted).
+        chosen = self.DEFAULT_SPACE if self.DEFAULT_SPACE in spaces else spaces[0]
+        warnings.warn(
             f"determine_space: multiple spaces found and none of the "
             f"preferred defaults {self.SPACE_PREFERENCE} present. "
-            f"Available spaces: {spaces}. "
-            f"Pass space=<one of these> when constructing CMLBIDSReader."
+            f"Available spaces: {spaces}. Defaulting to {chosen!r}. "
+            f"Pass space=<one of these> to choose explicitly.",
+            RuntimeWarning,
         )
+        return chosen
 
     def _validate_acq(self, acquisition: Optional[str]) -> Optional[str]:
         if not self.is_intracranial():
@@ -128,7 +136,7 @@ class CMLBIDSReader(BaseReader):
     def _attach_bipolar_midpoint_montage(self, raw: mne.io.BaseRaw, space: Optional[str] = None) -> None:
         pairs_df = self.load_channels("bipolar")
         elec_df = self.load_electrodes(space=space)
-        combo = combine_bipolar_electrodes(pairs_df, elec_df)
+        combo = combine_bipolar_electrodes(pairs_df, elec_df, space=self.space)
 
         if not {"name", "x_mid", "y_mid", "z_mid"}.issubset(combo.columns):
             return
@@ -208,7 +216,7 @@ class CMLBIDSReader(BaseReader):
         if acquisition == "monopolar" or acquisition is None:
             return channel_df.merge(elec_df, on="name", how="left", suffixes=("", "_elec"))
         if acquisition == "bipolar":
-            return combine_bipolar_electrodes(channel_df, elec_df)
+            return combine_bipolar_electrodes(channel_df, elec_df, space=self.space)
 
     @public_api
     def load_coordsystem_desc(self, space: Optional[str] = None) -> Dict:
