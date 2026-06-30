@@ -104,16 +104,24 @@ class CMLBIDSReader(BaseReader):
         if len(spaces) == 1:
             return spaces[0]
 
+        # Multiple spaces present: pick the highest-priority preferred space
+        # that is available.
         for preferred in self.SPACE_PREFERENCE:
             if preferred in spaces:
                 return preferred
 
-        raise AmbiguousMatchError(
+        # None of the preferred defaults is present. Rather than make the
+        # caller pass space= explicitly, fall back to a default: DEFAULT_SPACE
+        # if it happens to be available, otherwise the first space (sorted).
+        chosen = self.DEFAULT_SPACE if self.DEFAULT_SPACE in spaces else spaces[0]
+        warnings.warn(
             f"determine_space: multiple spaces found and none of the "
             f"preferred defaults {self.SPACE_PREFERENCE} present. "
-            f"Available spaces: {spaces}. "
-            f"Pass space=<one of these> when constructing CMLBIDSReader."
+            f"Available spaces: {spaces}. Defaulting to {chosen!r}. "
+            f"Pass space=<one of these> to choose explicitly.",
+            RuntimeWarning,
         )
+        return chosen
 
     def _validate_acq(self, acquisition: Optional[str]) -> Optional[str]:
         if not self.is_intracranial():

@@ -142,13 +142,27 @@ class TestDetermineSpace:
         with pytest.raises(FileNotFoundBIDSError, match="no.*coordsystem.json"):
             r._determine_space()
 
-    def test_multiple_coordsystem_files_raises(self, tmp_root):
+    def test_multiple_spaces_prefers_preferred_default(self, tmp_root):
+        """When several spaces are present, the highest-priority space in
+        SPACE_PREFERENCE wins (here MNI152NLin6ASym over fsnative)."""
+        data_dir = self._make_data_dir(tmp_root)
+        (data_dir / "sub-R1001P_ses-0_space-fsnative_coordsystem.json").touch()
+        (data_dir / "sub-R1001P_ses-0_space-MNI152NLin6ASym_coordsystem.json").touch()
+        r = CMLBIDSReader(root=tmp_root, subject="R1001P", task="FR1", session="0", device="ieeg")
+        assert r._determine_space() == "MNI152NLin6ASym"
+
+    def test_multiple_spaces_none_preferred_falls_back_with_warning(self, tmp_root):
+        """When multiple spaces are present and none is in SPACE_PREFERENCE,
+        _determine_space falls back to a default (warning) instead of raising.
+        Neither MNI nor TAL is a canonical preferred label, so it picks the
+        first available (sorted)."""
         data_dir = self._make_data_dir(tmp_root)
         (data_dir / "sub-R1001P_ses-0_space-MNI_coordsystem.json").touch()
         (data_dir / "sub-R1001P_ses-0_space-TAL_coordsystem.json").touch()
         r = CMLBIDSReader(root=tmp_root, subject="R1001P", task="FR1", session="0", device="ieeg")
-        with pytest.raises(AmbiguousMatchError, match="multiple coordsystem"):
-            r._determine_space()
+        with pytest.warns(RuntimeWarning, match="Defaulting to"):
+            chosen = r._determine_space()
+        assert chosen == "MNI"  # sorted(['MNI', 'TAL'])[0]
 
     def test_single_valid_match(self, tmp_root):
         data_dir = self._make_data_dir(tmp_root)

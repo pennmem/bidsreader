@@ -18,7 +18,6 @@ mapping see ``eeg_validation.preparers.montage.CML_TO_BIDS_SPACE`` or
 
 import numpy as np
 import pandas as pd
-from math import floor
 from typing import Iterable, Any, Tuple, Sequence, Optional, Dict
 import re
 from .exc import InvalidOptionError
@@ -168,7 +167,7 @@ def combine_bipolar_electrodes(
             mid_name = f"{col}_mid"  # e.g., "x_mid" or "tal.x_mid"
             mid = pair_coordinate_axis(a, b)
             if space == "Pixels":
-                mid = floor(mid)
+                mid = np.floor(mid)
             out[mid_name] = np.where(a.notna() & b.notna(), mid, np.nan)
 
     return out
