@@ -10,6 +10,6 @@ from .convert import mne_epochs_to_ptsa, mne_raw_to_ptsa
 from .units import detect_unit, get_scale_factor, convert_unit
 from collections import namedtuple
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 version_info = namedtuple("VersionInfo", "major,minor,patch")(
     *__version__.split('.'))

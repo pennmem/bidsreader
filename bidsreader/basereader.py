@@ -11,7 +11,7 @@ from .exc import InvalidOptionError, MissingRequiredFieldError
 
 
 class BaseReader:
-    _FIELDS = {"root", "subject", "session", "task", "acquisition", "_device", "_space"}
+    _FIELDS = {"root", "subject", "session", "task", "acquisition", "space", "_device", "_space"}
     # REQUIRED_FIELDS = ("subject", "task", "session", "device")
 
     def __init__(
@@ -88,6 +88,12 @@ class BaseReader:
             return None
 
         return self._space
+
+    @space.setter
+    def space(self, value: Optional[str]) -> None:
+        # space is user-overridable (e.g. switch to "Talairach" then reload
+        # electrodes/coordsystem).  device is intentionally NOT settable.
+        self._space = value
 
     @property
     def device(self) -> Optional[str]:
