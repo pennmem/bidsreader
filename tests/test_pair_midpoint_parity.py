@@ -1,4 +1,4 @@
-"""Parity test: bidsreader._neurorad_algo.pair_coordinate vs. the
+"""Parity test: bidsreader.src._neurorad_algo.pair_coordinate vs. the
 upstream neurorad pipeline's Localization.get_pair_coordinate.
 
 neurorad_pipeline is NOT a runtime dependency of bidsreader. It is
@@ -116,7 +116,7 @@ COORD_CASES = [
 def test_pair_coordinate_matches_upstream(space, ctype, c1, c2):
     """pair_coordinate(c1, c2) == Localization.get_pair_coordinate
     across every (space, coordinate_type) combination."""
-    from bidsreader._neurorad_algo import pair_coordinate
+    from bidsreader.src._neurorad_algo import pair_coordinate
 
     loc = _make_loc_with_two_contacts(space, c1, c2, ctype=ctype)
     upstream = loc.get_pair_coordinate(space, ["LA1", "LA2"], ctype)
@@ -131,7 +131,7 @@ def test_pair_coordinate_matches_upstream(space, ctype, c1, c2):
 
 def test_pair_coordinate_none_in_none_out():
     """Matches upstream short-circuit behavior (localization.py:286-287)."""
-    from bidsreader._neurorad_algo import pair_coordinate
+    from bidsreader.src._neurorad_algo import pair_coordinate
 
     assert pair_coordinate(None, [1.0, 2.0, 3.0]) is None
     assert pair_coordinate([1.0, 2.0, 3.0], None) is None

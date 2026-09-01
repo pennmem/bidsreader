@@ -1,5 +1,5 @@
 """
-Tests for bidsreader._errorwrap
+Tests for bidsreader.src._errorwrap
 
 What is tested:
   - public_api decorator passes through BIDSReaderError untouched
@@ -14,8 +14,8 @@ What is tested:
 import json
 import pytest
 
-from bidsreader._errorwrap import public_api
-from bidsreader.exc import (
+from bidsreader.src._errorwrap import public_api
+from bidsreader.src.exc import (
     BIDSReaderError,
     InvalidOptionError,
     FileNotFoundBIDSError,

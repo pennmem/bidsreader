@@ -46,7 +46,7 @@ def enrich_pairs_with_cml_regions(
     """Return a copy of ``pairs_df`` with CML ``*.region`` columns joined on.
 
     ``pairs_df`` is the output of
-    :func:`bidsreader.helpers.combine_bipolar_electrodes`, which uses
+    :func:`bidsreader.src.helpers.combine_bipolar_electrodes`, which uses
     ``name`` as the pair-label column by default.
     """
 

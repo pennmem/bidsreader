@@ -1,5 +1,5 @@
 """
-Tests for bidsreader._neurorad_algo
+Tests for bidsreader.src._neurorad_algo
 
 These are upstream-free unit tests for the copied neurorad pair-location
 algorithm. The rhino-only parity test in test_pair_midpoint_parity.py pins
@@ -14,7 +14,7 @@ What is tested:
 import numpy as np
 import pytest
 
-from bidsreader._neurorad_algo import (
+from bidsreader.src._neurorad_algo import (
     pair_coordinate,
     pair_coordinate_axis,
     VALID_COORDINATE_SPACES,

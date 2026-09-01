@@ -1,5 +1,5 @@
 """
-Tests for bidsreader.convert
+Tests for bidsreader.src.convert
 
 What is tested:
   - mne_raw_to_ptsa: basic conversion from MNE Raw to PTSA TimeSeries
@@ -33,7 +33,7 @@ class TestMneRawToPtsa:
     """Tests for mne_raw_to_ptsa."""
 
     def test_basic_conversion(self):
-        from bidsreader.convert import mne_raw_to_ptsa
+        from bidsreader.src.convert import mne_raw_to_ptsa
 
         raw = _make_raw(n_channels=2, n_times=500, sfreq=256.0)
         ts = mne_raw_to_ptsa(raw)
@@ -43,7 +43,7 @@ class TestMneRawToPtsa:
         assert float(ts.samplerate) == 256.0
 
     def test_with_picks(self):
-        from bidsreader.convert import mne_raw_to_ptsa
+        from bidsreader.src.convert import mne_raw_to_ptsa
 
         raw = _make_raw(n_channels=3, n_times=500, sfreq=256.0)
         ts = mne_raw_to_ptsa(raw, picks=["EEG000", "EEG002"])
@@ -51,7 +51,7 @@ class TestMneRawToPtsa:
         assert ts.shape[0] == 2
 
     def test_with_crop(self):
-        from bidsreader.convert import mne_raw_to_ptsa
+        from bidsreader.src.convert import mne_raw_to_ptsa
 
         raw = _make_raw(n_channels=2, n_times=1000, sfreq=100.0)
         # 1000 samples at 100 Hz = 10 seconds; crop to [1.0, 3.0]
@@ -67,7 +67,7 @@ class TestMneEpochsToPtsa:
     """Tests for mne_epochs_to_ptsa."""
 
     def test_basic_conversion(self):
-        from bidsreader.convert import mne_epochs_to_ptsa
+        from bidsreader.src.convert import mne_epochs_to_ptsa
         import pandas as pd
 
         raw = _make_raw(n_channels=2, n_times=2000, sfreq=256.0)

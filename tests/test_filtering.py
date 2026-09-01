@@ -1,5 +1,5 @@
 """
-Tests for bidsreader.filtering
+Tests for bidsreader.src.filtering
 
 What is tested:
   - _label_has_trial_type: exact match, slash-separated, no match
@@ -11,7 +11,7 @@ import pytest
 import numpy as np
 import pandas as pd
 
-from bidsreader.filtering import (
+from bidsreader.src.filtering import (
     _label_has_trial_type,
     _ensure_list,
     filter_events_df_by_trial_types,

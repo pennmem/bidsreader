@@ -13,7 +13,7 @@ export.
 
 For the BIDS space ↔ CML ``coordinate_space`` / ``coordinate_type``
 mapping see ``eeg_validation.preparers.montage.CML_TO_BIDS_SPACE`` or
-:attr:`bidsreader._neurorad_algo.BIDS_SPACE_TO_NEURORAD`.
+:attr:`bidsreader.src._neurorad_algo.BIDS_SPACE_TO_NEURORAD`.
 """
 
 import numpy as np
@@ -119,7 +119,7 @@ def combine_bipolar_electrodes(
     """Join bipolar pairs with electrode metadata and compute per-pair
     coordinate midpoints, matching the neurorad pipeline's pair-location
     algorithm (``Localization.get_pair_coordinate`` — see
-    :mod:`bidsreader._neurorad_algo`). Midpoint is taken in whatever BIDS
+    :mod:`bidsreader.src._neurorad_algo`). Midpoint is taken in whatever BIDS
     space ``elec_df`` carries; upstream brainshift / nonlinear-warp
     corrections are expected to have already been applied per-contact.
 

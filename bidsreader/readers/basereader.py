@@ -5,9 +5,9 @@ from mne_bids import BIDSPath, get_entity_vals
 from pathlib import Path
 from typing import Iterable, Optional, Union, List
 import warnings
-from ._errorwrap import public_api
-from .helpers import add_prefix
-from .exc import InvalidOptionError, MissingRequiredFieldError
+from ..src._errorwrap import public_api
+from ..src.helpers import add_prefix
+from ..src.exc import InvalidOptionError, MissingRequiredFieldError
 
 
 class BaseReader:
@@ -29,7 +29,7 @@ class BaseReader:
         self.root = Path(root)
         self.subject = subject
         self.session = session
-        self.task = str(task)
+        self.task = str(task) if task is not None else None
 
         self.acquisition = acquisition
 

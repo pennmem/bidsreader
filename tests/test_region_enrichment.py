@@ -1,5 +1,5 @@
 """
-Tests for bidsreader.region_enrichment.enrich_pairs_with_cml_regions
+Tests for bidsreader.src.region_enrichment.enrich_pairs_with_cml_regions
 
 enrich_pairs_with_cml_regions joins authoritative pair-level region labels
 from the upstream CML pairs.json onto a bidsreader pairs DataFrame. It loads
@@ -19,7 +19,7 @@ import importlib.util
 import pandas as pd
 import pytest
 
-from bidsreader.region_enrichment import enrich_pairs_with_cml_regions
+from bidsreader.src.region_enrichment import enrich_pairs_with_cml_regions
 
 # enrich_pairs_with_cml_regions imports cmlreaders unconditionally (even when a
 # reader is injected), so skip the whole module where cmlreaders is unavailable.

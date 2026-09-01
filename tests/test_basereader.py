@@ -1,5 +1,5 @@
 """
-Tests for bidsreader.basereader
+Tests for bidsreader.readers.basereader
 
 What is tested:
   - __init__: root=None raises, valid construction, device validated against VALID_DEVICES
@@ -19,8 +19,8 @@ import warnings
 from pathlib import Path
 from unittest.mock import patch
 
-from bidsreader.basereader import BaseReader
-from bidsreader.exc import InvalidOptionError, MissingRequiredFieldError
+from bidsreader.readers.basereader import BaseReader
+from bidsreader.src.exc import InvalidOptionError, MissingRequiredFieldError
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +226,7 @@ class TestSetFields:
 
     def test_rejects_unknown_field(self, base_reader):
         # @public_api wraps AttributeError -> ExternalLibraryError
-        from bidsreader.exc import ExternalLibraryError
+        from bidsreader.src.exc import ExternalLibraryError
         with pytest.raises(ExternalLibraryError, match="Unknown field"):
             base_reader.set_fields(nonexistent="value")
 
@@ -237,21 +237,21 @@ class TestSetFields:
 class TestMetadataQueries:
     """Tests for get_subject_*, get_dataset_* methods using mocked get_entity_vals."""
     # data is all mocked, we will use real data in test_integration
-    @patch("bidsreader.basereader.get_entity_vals", return_value=["FR1", "catFR1"])
+    @patch("bidsreader.readers.basereader.get_entity_vals", return_value=["FR1", "catFR1"])
     def test_get_subject_tasks(self, mock_gev, base_reader):
         result = base_reader.get_subject_tasks()
         assert result == ["FR1", "catFR1"]
 
-    @patch("bidsreader.basereader.get_entity_vals", return_value=["0", "1", "2"])
+    @patch("bidsreader.readers.basereader.get_entity_vals", return_value=["0", "1", "2"])
     def test_get_subject_sessions(self, mock_gev, base_reader):
         result = base_reader.get_subject_sessions()
         assert result == ["0", "1", "2"]
 
-    @patch("bidsreader.basereader.get_entity_vals", return_value=["01", "02"])
+    @patch("bidsreader.readers.basereader.get_entity_vals", return_value=["01", "02"])
     def test_get_dataset_subjects(self, mock_gev, base_reader):
         assert base_reader.get_dataset_subjects() == ["01", "02"]
 
-    @patch("bidsreader.basereader.get_entity_vals", return_value=["FR1"])
+    @patch("bidsreader.readers.basereader.get_entity_vals", return_value=["FR1"])
     def test_get_dataset_tasks(self, mock_gev, base_reader):
         assert base_reader.get_dataset_tasks() == ["FR1"]
 
@@ -259,7 +259,7 @@ class TestMetadataQueries:
 class TestGetDatasetMaxSessions:
     """Tests for get_dataset_max_sessions with various session formats."""
 
-    @patch("bidsreader.basereader.get_entity_vals")
+    @patch("bidsreader.readers.basereader.get_entity_vals")
     def test_numeric_sessions(self, mock_gev, base_reader):
         mock_gev.side_effect = [
             ["01", "02"],        # get_dataset_subjects
@@ -269,7 +269,7 @@ class TestGetDatasetMaxSessions:
         result = base_reader.get_dataset_max_sessions()
         assert result == 5
 
-    @patch("bidsreader.basereader.get_entity_vals")
+    @patch("bidsreader.readers.basereader.get_entity_vals")
     def test_non_numeric_sessions_skipped(self, mock_gev, base_reader):
         mock_gev.side_effect = [
             ["01"],
@@ -278,7 +278,7 @@ class TestGetDatasetMaxSessions:
         result = base_reader.get_dataset_max_sessions()
         assert result is None
 
-    @patch("bidsreader.basereader.get_entity_vals")
+    @patch("bidsreader.readers.basereader.get_entity_vals")
     def test_outlier_threshold(self, mock_gev, base_reader):
         mock_gev.side_effect = [
             ["01"],
@@ -288,7 +288,7 @@ class TestGetDatasetMaxSessions:
             result = base_reader.get_dataset_max_sessions(outlier_thresh=50)
         assert result == 2
 
-    @patch("bidsreader.basereader.get_entity_vals")
+    @patch("bidsreader.readers.basereader.get_entity_vals")
     def test_no_subjects_returns_none(self, mock_gev, base_reader):
         mock_gev.return_value = []
         result = base_reader.get_dataset_max_sessions()

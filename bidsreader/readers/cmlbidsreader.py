@@ -7,9 +7,9 @@ from typing import Iterable, Tuple, Optional, Union, Dict
 import warnings
 import json
 from .basereader import BaseReader
-from ._errorwrap import public_api
-from .helpers import validate_option, space_from_coordsystem_fname, combine_bipolar_electrodes
-from .exc import InvalidOptionError, FileNotFoundBIDSError, AmbiguousMatchError, DataParseError
+from ..src._errorwrap import public_api
+from ..src.helpers import validate_option, space_from_coordsystem_fname, combine_bipolar_electrodes
+from ..src.exc import InvalidOptionError, FileNotFoundBIDSError, AmbiguousMatchError, DataParseError
 
 CML_ROOT = "/data/LTP_BIDS"
 

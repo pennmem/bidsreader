@@ -1,5 +1,5 @@
 """
-Tests for bidsreader.exc
+Tests for bidsreader.src.exc
 
 What is tested:
   - All exception classes exist
@@ -9,7 +9,7 @@ What is tested:
 """
 import pytest
 
-from bidsreader.exc import (
+from bidsreader.src.exc import (
     BIDSReaderError,
     InvalidOptionError,
     MissingRequiredFieldError,

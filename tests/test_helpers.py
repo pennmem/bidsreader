@@ -1,5 +1,5 @@
 """
-Tests for bidsreader.helpers
+Tests for bidsreader.src.helpers
 
 What is tested:
   - validate_option: None passthrough, valid value, invalid raises InvalidOptionError
@@ -15,7 +15,7 @@ import pytest
 import numpy as np
 import pandas as pd
 
-from bidsreader.helpers import (
+from bidsreader.src.helpers import (
     validate_option,
     space_from_coordsystem_fname,
     add_prefix,
@@ -25,7 +25,7 @@ from bidsreader.helpers import (
     normalize_trial_types,
     match_event_label,
 )
-from bidsreader.exc import InvalidOptionError
+from bidsreader.src.exc import InvalidOptionError
 
 
 # ---------------------------------------------------------------------------

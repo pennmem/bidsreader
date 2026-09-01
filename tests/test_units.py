@@ -1,5 +1,5 @@
 """
-Tests for bidsreader.units
+Tests for bidsreader.src.units
 
 What is tested:
   - _normalize_unit: all non-ASCII character replacements (µ, μ, Ω, Ω, °)
@@ -19,7 +19,7 @@ import pytest
 import numpy as np
 import mne
 
-from bidsreader.units import (
+from bidsreader.src.units import (
     _normalize_unit,
     _UNIT_EXPONENTS,
     _EXP_TO_PREFIX,
@@ -31,8 +31,8 @@ from bidsreader.units import (
     detect_unit,
     convert_unit,
 )
-from bidsreader.convert import mne_raw_to_ptsa
-from bidsreader.exc import ExternalLibraryError
+from bidsreader.src.convert import mne_raw_to_ptsa
+from bidsreader.src.exc import ExternalLibraryError
 
 
 # ---------------------------------------------------------------------------
@@ -360,23 +360,23 @@ class TestPtsaFunctions:
 
     # _detect_unit_ptsa
     def test_detect_unit_ptsa_reads_units_attr(self):
-        from bidsreader.units import _detect_unit_ptsa
+        from bidsreader.src.units import _detect_unit_ptsa
         ts = self._make_timeseries("uV")
         assert _detect_unit_ptsa(ts) == "uV"
 
     def test_detect_unit_ptsa_normalizes_micro(self):
-        from bidsreader.units import _detect_unit_ptsa
+        from bidsreader.src.units import _detect_unit_ptsa
         ts = self._make_timeseries("\u00b5V")
         assert _detect_unit_ptsa(ts) == "uV"
 
     def test_detect_unit_ptsa_unrecognized_raises(self):
-        from bidsreader.units import _detect_unit_ptsa
+        from bidsreader.src.units import _detect_unit_ptsa
         ts = self._make_timeseries("kW")
         with pytest.raises(ValueError, match="not recognized"):
             _detect_unit_ptsa(ts)
 
     def test_detect_unit_ptsa_no_attr_raises(self):
-        from bidsreader.units import _detect_unit_ptsa
+        from bidsreader.src.units import _detect_unit_ptsa
         ts = self._make_timeseries("uV")
         del ts.attrs["units"]
         del ts.attrs["unit"]
@@ -385,7 +385,7 @@ class TestPtsaFunctions:
 
     # _convert_ptsa
     def test_convert_ptsa_copy_true(self):
-        from bidsreader.units import _convert_ptsa
+        from bidsreader.src.units import _convert_ptsa
         ts = self._make_timeseries("V")
         result = _convert_ptsa(ts, 1e6, "uV", copy=True)
         np.testing.assert_allclose(result.values, ts.values * 1e6)
@@ -393,7 +393,7 @@ class TestPtsaFunctions:
         assert result.attrs["unit"] == "uV"
 
     def test_convert_ptsa_copy_false(self):
-        from bidsreader.units import _convert_ptsa
+        from bidsreader.src.units import _convert_ptsa
         ts = self._make_timeseries("V")
         original_values = ts.values.copy()
         result = _convert_ptsa(ts, 1e6, "uV", copy=False)

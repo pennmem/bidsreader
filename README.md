@@ -177,25 +177,44 @@ ts = mne_raw_to_ptsa(raw, picks=["E1", "E2"], tmin=0.0, tmax=10.0)
 
 ## Architecture
 
+### Package layout
+
+The package is split in two. **Every reader lives in `readers/`** — that's the folder
+to open first. `src/` holds the shared machinery the readers are built from.
+
+```
+bidsreader/
+├── readers/     # one module per dataset. Start here.
+└── src/         # shared machinery: exceptions, helpers, units, filtering, conversion
+```
+
+Both are re-exported from the top level, so day-to-day use is a single import:
+
+```python
+from bidsreader import CMLBIDSReader, NiaBIDSReader, detect_unit, FileNotFoundBIDSError
+```
+
 ### Class hierarchy
 
 ```
-BaseReader              # Abstract base — BIDS path construction, metadata queries, field validation
-└── CMLBIDSReader       # Concrete reader for the CML (Computational Memory Lab) dataset
+BaseReader              # Base — BIDS path construction, metadata queries, field validation
+├── CMLBIDSReader       # CML (Computational Memory Lab) datasets
+└── NiaBIDSReader       # Nia Therapeutics BIDS conversions (written by niadatsci)
 ```
 
 ### Module overview
 
 | Module           | Purpose                                                  |
 |------------------|----------------------------------------------------------|
-| `basereader.py`  | `BaseReader` class — shared BIDS logic and metadata queries |
-| `cmlbidsreader.py` | `CMLBIDSReader` — CML-specific loading and auto-detection |
-| `filtering.py`   | Trial-type filtering for DataFrames, MNE Raw, and Epochs |
-| `convert.py`     | MNE to PTSA TimeSeries conversion                        |
-| `units.py`       | Unit detection, scaling, and conversion                  |
-| `helpers.py`     | Utility functions (validation, BIDS prefix handling, bipolar electrode merging) |
-| `exc.py`         | Custom exception hierarchy                               |
-| `_errorwrap.py`  | `@public_api` decorator for consistent exception wrapping |
+| `readers/basereader.py` | `BaseReader` class — shared BIDS logic and metadata queries |
+| `readers/cmlbidsreader.py` | `CMLBIDSReader` — CML-specific loading and auto-detection |
+| `readers/niabidsreader.py` | `NiaBIDSReader` — Nia conversions (BrainVision, physio, montage `acq-`) |
+| `src/filtering.py`   | Trial-type filtering for DataFrames, MNE Raw, and Epochs |
+| `src/convert.py`     | MNE to PTSA TimeSeries conversion                        |
+| `src/units.py`       | Unit detection, scaling, and conversion                  |
+| `src/helpers.py`     | Utility functions (validation, BIDS prefix handling, bipolar electrode merging) |
+| `src/exc.py`         | Custom exception hierarchy                               |
+| `src/_errorwrap.py`  | `@public_api` decorator for consistent exception wrapping |
 
 ### Exception hierarchy
 
@@ -213,7 +232,7 @@ BIDSReaderError
 ```
 
 ```python
-from bidsreader.exc import BIDSReaderError, FileNotFoundBIDSError
+from bidsreader import BIDSReaderError, FileNotFoundBIDSError
 
 try:
     events = reader.load_events()
@@ -229,7 +248,8 @@ To support a different BIDS dataset, subclass `BaseReader` and implement your da
 
 ### Step 1: Create your reader class
 
-Create a new file (e.g., `bidsreader/myreader.py`):
+Create a new file in the readers folder (e.g., `bidsreader/readers/myreader.py`). Note the
+import paths: sibling readers are `.`, and the shared machinery in `src/` is `..src.`.
 
 ```python
 import pandas as pd
@@ -237,9 +257,9 @@ import mne
 from pathlib import Path
 from typing import Optional, Union
 from .basereader import BaseReader
-from ._errorwrap import public_api
-from .helpers import validate_option
-from .exc import FileNotFoundBIDSError
+from ..src._errorwrap import public_api
+from ..src.helpers import validate_option
+from ..src.exc import FileNotFoundBIDSError
 
 
 class MyDatasetReader(BaseReader):
@@ -333,10 +353,16 @@ class MyDatasetReader(BaseReader):
 
 ### Step 3: Export your reader
 
-Add your reader to [\_\_init\_\_.py](bidsreader/__init__.py):
+Export it from both `__init__.py` files — [readers/\_\_init\_\_.py](bidsreader/readers/__init__.py)
+so it sits with the other readers, and [\_\_init\_\_.py](bidsreader/__init__.py) so callers get
+it from the top level:
 
 ```python
+# bidsreader/readers/__init__.py
 from .myreader import MyDatasetReader
+
+# bidsreader/__init__.py
+from .readers.myreader import MyDatasetReader
 ```
 
 ### Step 4: Write tests
@@ -442,6 +468,44 @@ Inherits all `BaseReader` methods, plus:
 | `load_raw(acquisition=None)` | Load raw continuous data (returns `mne.io.BaseRaw`) |
 | `load_epochs(tmin, tmax, events=None, baseline=None, acquisition=None, event_repeated="merge", channels=None, preload=False)` | Create `mne.Epochs` from raw data and events |
 
+### NiaBIDSReader
+
+Reads the BIDS conversions written by [niadatsci](https://github.com/) (`niashare.bids_convert.NiaBIDSConverter`).
+Inherits all `BaseReader` methods, plus:
+
+| Method | Description |
+|--------|-------------|
+| `is_nia_dataset()` | Returns `True` if `root` holds a niadatsci-generated dataset |
+| `first_sample()` | Device-clock sample at which the recording begins. Provenance — relates `sample` to the `eegoffset` columns; not needed for epoching |
+| `units_status()` | `"calibrated"` if the signal is in µV, otherwise raw ADC counts |
+| `list_available_physio()` | List the `recording-<label>` physio streams for this session |
+| `load_events(coerce_numeric=True)` | Load events TSV (literal `n/a` preserved) |
+| `load_events_json()` | Load the events sidecar (column descriptions, `Levels`) |
+| `load_channels(coerce_numeric=True)` | Load channel metadata TSV |
+| `load_sidecar()` | Load the `_eeg.json` sidecar, including `Nia*` provenance keys |
+| `load_physio(recording=None)` | Load a continuous non-EEG timeseries (classifier or IMU) |
+| `load_electrodes()` | Load electrode coordinates TSV (usually absent — see below) |
+| `load_coordsystem_desc()` | Load coordinate system JSON (usually absent) |
+| `load_participants()` / `load_scans()` / `load_dataset_description()` | Dataset- and session-level metadata |
+| `load_raw(extension=None)` | Load raw BrainVision data (returns `mne.io.BaseRaw`) |
+| `load_epochs(tmin, tmax, events=None, baseline=None, event_repeated="merge", channels=None, preload=False, extension=None)` | Create `mne.Epochs`, applying the `first_sample()` correction |
+| `get_data_index(root=None, task=None)` | Session index with file paths and `Nia*` quality columns |
+
+`root` must point at the **dataset directory** — `<bids_root>/<protocol>/<experiment>`, e.g.
+`/bids/preclinical/ACL` — not at `<bids_root>`. Nia writes one dataset per experiment because
+session numbers restart at zero per `(subject, experiment)`. `is_nia_dataset()` catches the
+mistake cheaply:
+
+```python
+from bidsreader import NiaBIDSReader
+
+reader = NiaBIDSReader(root="/bids/preclinical/ACL", subject="S002", session=0)
+assert reader.is_nia_dataset()
+
+events = reader.load_events()      # task is inferred from the dataset
+epochs = reader.load_epochs(tmin=-0.5, tmax=1.0, events=events)
+```
+
 ### Standalone Functions
 
 | Function | Module | Description |
@@ -455,6 +519,75 @@ Inherits all `BaseReader` methods, plus:
 | `convert_unit(data, target, *, current_unit=None, copy=True)` | `units` | Convert EEG data to a target unit |
 | `mne_epochs_to_ptsa(epochs, events)` | `convert` | Convert MNE Epochs to PTSA TimeSeries |
 | `mne_raw_to_ptsa(raw, picks=None, tmin=None, tmax=None)` | `convert` | Convert MNE Raw to PTSA TimeSeries |
+
+## Known Issues
+
+### Nia event `sample` is an index into the recording
+
+**Status:** resolved on the conversion side. Recorded here because the previous convention was
+different, and a dataset converted before the change will now be **rejected** by the reader
+rather than silently misread.
+
+**The current contract.** `NiaBIDSConverter` writes event positions relative to the recording:
+
+| Field | Meaning | Range |
+|-------|---------|-------|
+| `events.tsv` `sample` | Index into this recording, counting from zero at the first stored sample | `0 <= sample < raw.n_times`, or `n/a` |
+| `events.tsv` `onset` | `sample / SamplingFrequency`, derived from `sample` so the two agree by construction | `>= 0`, or `n/a` |
+| `eegoffset` / `eegoffset_cmd` | Absolute device-clock counter, free-running | unbounded |
+| `NiaFirstSample` (`_eeg.json`) | Device sample at which the recording begins | provenance only |
+
+So `sample` indexes an MNE `Raw` directly — `load_epochs()` applies no offset, and
+`first_sample()` is not consulted when epoching. What `first_sample()` is for is relating the two
+clocks: `eegoffset_cmd - first_sample() == sample`, which is how you match a BIDS event back to a
+row in the source archive.
+
+**Why this is called out.** BrainVision cannot store `first_samp`, so `read_raw_bids()` always
+reports a recording starting at sample 0. Earlier conversions wrote `sample` as an **absolute
+device index**, which meant using it to index the `Raw` produced a valid index pointing at the
+wrong time — no exception, no warning, every epoch shifted by `NiaFirstSample`. The reader
+compensated by subtracting it. Both halves of that are now gone.
+
+**A stale tree fails loudly.** `dataset_description.json` carries no version, so the two
+conventions cannot be told apart from metadata. Instead `load_epochs()` range-checks every
+sample and raises `DataParseError` if any falls at or beyond `raw.n_times` — which is exactly
+what old absolute-sample events look like. The error names the remedy: re-run the niadatsci
+`share` step for that session. This mirrors an invariant the converter itself asserts
+(`max(sample) < raw.n_times`), so the check cannot disagree with correctly converted output.
+
+**Events with no position.** An event logged before the recording started — the command log can
+begin before the EEG stream is up — gets `n/a` in both `sample` and `onset`. The row survives
+intact, including its absolute `eegoffset_cmd`; only its position in this recording is unknown.
+
+- `load_events()` emits a `RuntimeWarning`, because a column holding `n/a` stays strings and
+  `df["sample"].max()` would silently compare strings rather than numbers.
+- `load_epochs()` **raises** rather than dropping those rows, so a trial count cannot shrink
+  unnoticed. The error gives the filter to apply:
+
+```python
+events = events[pd.to_numeric(events["sample"], errors="coerce").notna()]
+```
+
+### Related conversion-side quirks
+
+Same category — decisions in the converter that the reader has to compensate for. Worth revisiting
+together if the conversion is being changed:
+
+| Quirk | Effect on the reader |
+|-------|----------------------|
+| The device's stim duration is renamed to `stim_duration`, because BIDS reserves `duration`. BIDS `duration` is then `n/a` unless the conversion ran with `--stim-duration-units`. | Callers reaching for `duration` get `n/a`. The reader documents this but cannot fix it. |
+| `channels.tsv` `units` is the literal string `arbitrary` when the conversion ran without `--microvolts-per-lsb` — the signal is raw 15-bit ADC counts. | `bidsreader.src.units.detect_unit()` rejects `arbitrary`, so unit conversion is unavailable. Check `reader.units_status()` first. |
+| `electrodes.tsv` / `coordsystem.json` are written only when the source `electrodes.csv` carries coordinates, which is usually not the case. | `load_electrodes()` / `load_coordsystem_desc()` raise `FileNotFoundBIDSError`. Treat both as optional. |
+
+### Validation errors are reported as `ExternalLibraryError`
+
+`@public_api` wraps bare `ValueError` into `ExternalLibraryError`
+([_errorwrap.py](bidsreader/src/_errorwrap.py)), so some deliberate validation failures — an
+unknown unit, an unknown field — surface as though a third-party library crashed. Exceptions
+already in the hierarchy (`InvalidOptionError`, `MissingRequiredFieldError`) pass through
+untouched. Catching `BIDSReaderError` is unaffected; catching `ValueError` will miss these.
+`NiaBIDSReader` raises `DataParseError` for its own validation failures rather than relying on
+the wrapper, so it differs from `CMLBIDSReader` here.
 
 ## License
 

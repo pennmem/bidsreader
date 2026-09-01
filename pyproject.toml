@@ -44,7 +44,7 @@ Issues = "https://github.com/pennmem/bidsreader/issues"
 
 [tool.setuptools.packages.find]
 include = ["bidsreader*"]
-exclude = ["tests*", "tutorials*", "cmlbidsreader_tutorials*"]
+exclude = ["tests*", "tutorials*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

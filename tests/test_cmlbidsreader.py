@@ -1,5 +1,5 @@
 """
-Tests for bidsreader.cmlbidsreader
+Tests for bidsreader.readers.cmlbidsreader
 
 What is tested:
   Unit tests:
@@ -28,8 +28,8 @@ import pandas as pd
 import mne
 from pathlib import Path
 
-from bidsreader.cmlbidsreader import CMLBIDSReader, CML_ROOT
-from bidsreader.exc import (
+from bidsreader.readers.cmlbidsreader import CMLBIDSReader, CML_ROOT
+from bidsreader.src.exc import (
     InvalidOptionError,
     FileNotFoundBIDSError,
     AmbiguousMatchError,
