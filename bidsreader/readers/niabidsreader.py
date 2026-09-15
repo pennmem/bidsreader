@@ -272,7 +272,8 @@ class NiaBIDSReader(BaseReader):
         path = Path(path)
         if not path.exists():
             raise FileNotFoundBIDSError(f"File not found: {path}")
-        return pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False, **kwargs)
+        df = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False, **kwargs)
+        return df.astype(object)
 
     @staticmethod
     def _coerce_numeric(df: pd.DataFrame, skip: Iterable[str] = ()) -> pd.DataFrame:
