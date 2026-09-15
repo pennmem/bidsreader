@@ -33,6 +33,6 @@ from .src.exc import (
 )
 from collections import namedtuple
 
-__version__ = "0.4.0"
+__version__ = "1.0.0"
 version_info = namedtuple("VersionInfo", "major,minor,patch")(
     *__version__.split('.'))
